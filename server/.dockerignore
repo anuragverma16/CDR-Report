@@ -1,0 +1,7 @@
+# Keep secrets, local data and build output out of the image (secrets are set in Render's Environment tab)
+.env
+.env.*
+node_modules
+storage
+test
+*.log

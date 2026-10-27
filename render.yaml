@@ -4,23 +4,17 @@
 services:
   - type: web
     name: tata-dialer-api
-    runtime: node
+    runtime: docker          # server/Dockerfile installs Node 20 and Chromium (report images)
+    dockerContext: ./server
+    dockerfilePath: ./server/Dockerfile
     region: singapore
     plan: starter            # a persistent disk needs a paid plan
-    rootDir: server
-    buildCommand: npm ci && npm run install-browser
-    startCommand: npm start
     healthCheckPath: /api/health
     disk:
       name: tata-dialer-storage
       mountPath: /var/data/storage
       sizeGB: 5
     envVars:
-      # Keep the Chromium used for report images inside the project, so the build's install is found when the server starts
-      - key: PLAYWRIGHT_BROWSERS_PATH
-        value: /opt/render/project/src/.playwright-browsers
-      - key: NODE_VERSION
-        value: "20"
       - key: NODE_ENV
         value: production
       - key: MONGODB_URI
