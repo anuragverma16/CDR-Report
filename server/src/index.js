@@ -51,10 +51,25 @@ export function createApp() {
   return app;
 }
 
+/**
+ * Keep trying to reach MongoDB instead of exiting. The port is already open, so the host (Render) stays up,
+ * /api/health reports db: false, and the log says exactly what to fix. Connects as soon as the database answers.
+ */
+async function connectDatabase() {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await mongoose.connect(config.mongoUri, { serverSelectionTimeoutMS: 15000 });
+      console.log('[db] connected');
+      return;
+    } catch (e) {
+      console.error(`[db] connection failed (attempt ${attempt}): ${e.message}. Retrying in 15 s. Check MONGODB_URI and, for Atlas, Network Access (allow 0.0.0.0/0 for Render).`);
+      await new Promise((r) => setTimeout(r, 15000));
+    }
+  }
+}
+
 async function main() {
   await ensureStorage();
-  await mongoose.connect(config.mongoUri);
-  console.log('[db] connected');
   const app = createApp();
   const server = await new Promise((resolve, reject) => {
     const listener = app.listen(config.port, () => resolve(listener));
@@ -64,6 +79,7 @@ async function main() {
     throw error;
   });
   console.log(`[api] listening on :${config.port}`);
+  await connectDatabase();
   await startScheduler();
   warmBrowser();
   const shutdown = async () => {

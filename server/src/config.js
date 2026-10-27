@@ -16,7 +16,7 @@ const isTest = process.env.NODE_ENV === 'test';
 function mongoUriFor() {
   const uri = isTest ? process.env.MONGODB_URI || '' : required('MONGODB_URI');
   if (process.env.NODE_ENV === 'production' && /127\.0\.0\.1|localhost/.test(uri)) {
-    throw new Error('MONGODB_URI points to this computer (127.0.0.1 / localhost). On Render, set it to your MongoDB Atlas connection string in the service\'s Environment tab, then redeploy.');
+    console.error('[config] MONGODB_URI points to this computer (127.0.0.1 / localhost). On Render, set it to your MongoDB Atlas connection string in the Environment tab, then redeploy.');
   }
   return uri;
 }
