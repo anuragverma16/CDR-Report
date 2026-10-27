@@ -4,6 +4,7 @@ import utc from 'dayjs/plugin/utc.js';
 import timezone from 'dayjs/plugin/timezone.js';
 import { config } from '../config.js';
 import { displayRow, layoutOf } from './aggregator.js';
+import { renderReportSvgPng } from './reportSvg.js';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -91,7 +92,18 @@ export async function closeBrowser() {
  * We start with a very wide viewport, then measure the real rendered size of #report
  * and resize the viewport to match — so nothing is ever clipped regardless of table width.
  */
+/** PNG of the report. Uses Chromium when it is installed; otherwise draws it without a browser. */
 export async function renderReportPng(report, opts) {
+  try {
+    return await renderWithBrowser(report, opts);
+  } catch (e) {
+    // Chromium missing on this server (e.g. Render's native Node runtime): same report, drawn without a browser
+    if (/Executable doesn't exist|browserType\.launch|Failed to launch/i.test(e.message)) return renderReportSvgPng(report, opts);
+    throw e;
+  }
+}
+
+async function renderWithBrowser(report, opts) {
   const html = renderReportHtml(report, opts);
   const browser = await getBrowser();
   // Use an extra-wide initial viewport to allow full layout before measuring
