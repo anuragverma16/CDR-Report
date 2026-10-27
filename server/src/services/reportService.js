@@ -71,7 +71,7 @@ export async function generateReport({ type, fileIds, reportDate, dateFrom, date
     doc.imageStatus = 'ready';
   } catch (e) {
     doc.imageStatus = 'failed';
-    doc.imageError = `PNG rendering failed: ${e.message.split('\n')[0]}. Run "npm run install-browser" on the server.`;
+    doc.imageError = `PNG rendering failed: ${e.message.split('\n')[0]}. Chromium is missing on this server: on Render, run the Docker service built from server/Dockerfile (locally, run "npm run install-browser"). The Excel file is still available.`;
   }
   await doc.save();
   await audit(userId, 'report.generate', String(doc._id), { type, reportDate: label, files: doc.sourceNames, totalCalls: doc.totalCalls, trigger });
