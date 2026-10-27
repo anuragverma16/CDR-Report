@@ -27,7 +27,7 @@ services:
       - key: JWT_EXPIRES_IN
         value: 12h
       - key: CORS_ORIGIN
-        sync: false          # the Vercel website address, e.g. https://tata-dialer.vercel.app (comma-separate several)
+        sync: false          # the Vercel website address, e.g. https://cdr-report1.vercel.app (comma-separate several)
       - key: COOKIE_SECURE
         value: "true"
       - key: COOKIE_SAMESITE
@@ -74,3 +74,9 @@ services:
         value: "10"
       - key: ANTHROPIC_API_KEY
         sync: false          # optional: AI wording for team messages
+      - key: ADMIN_EMAIL
+        sync: false          # predefined admin login email
+      - key: ADMIN_NAME
+        value: Admin
+      - key: ADMIN_PASSWORD
+        sync: false          # predefined admin password (at least 10 characters)

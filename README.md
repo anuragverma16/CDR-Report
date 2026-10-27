@@ -166,12 +166,12 @@ The API (`server/`) runs on Render. The website (`client/`) runs on Vercel. They
 2. In Render, choose New → Blueprint, select this repository. It reads `render.yaml`.
 3. Fill in the variables marked "sync: false":
    - `MONGODB_URI`: the Atlas connection string.
-   - `CORS_ORIGIN`: the website's address(es), comma-separated, exact match, no trailing slash, e.g. `https://tata-dialer.vercel.app`. Add each Vercel preview URL you want to use.
+   - `CORS_ORIGIN`: the website's address(es), comma-separated, exact match, no trailing slash, e.g. `https://cdr-report1.vercel.app`. Add each Vercel preview URL you want to use.
    - `MYSQL_HOST`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE`.
    - `NEXSAHAY_API_KEY`, `NEXSAHAY_SESSION_ID`.
    - `ANTHROPIC_API_KEY` (optional).
    - `JWT_SECRET` is generated automatically.
-4. Deploy, then open `https://<api>.onrender.com/api/health`. It should show `"ok":true`.
+4. Deploy, then open `https://cdr-report-server.onrender.com/api/health`. It should show `"ok":true`.
 5. In the API's shell, create the first admin: `npm run create-admin`.
 
 The disk in `render.yaml` needs a paid plan. Without it, uploads and generated reports are lost on each restart.
@@ -180,7 +180,7 @@ Report images need Chromium. The build runs `npm run install-browser`. If the bu
 
 ### 2. Website on Vercel
 1. Import this repository in Vercel. Set **Root Directory** to `client`. Vercel reads `client/vercel.json` for the Vite build and the routing for page refreshes.
-2. Add the environment variable `VITE_API_URL` = the API address from step 1, e.g. `https://tata-dialer-api.onrender.com` (no trailing slash). Set it for both Production and Preview.
+2. Add the environment variable `VITE_API_URL` = the API address from step 1, e.g. `https://cdr-report-server.onrender.com` (no trailing slash). Set it for both Production and Preview.
 3. Deploy. Then add the Vercel address to `CORS_ORIGIN` on Render and redeploy the API.
 
 ### Checklist

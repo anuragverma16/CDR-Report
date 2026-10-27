@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { ensureStorage } from './services/storage.js';
 import { startScheduler } from './services/scheduler.js';
+import { ensurePredefinedAdmin } from './services/admin.js';
 import { closeBrowser, warmBrowser } from './services/image.js';
 import { closeMysql } from './services/mysqlSource.js';
 import { errorHandler, originCheck } from './middleware/index.js';
@@ -80,6 +81,7 @@ async function main() {
   });
   console.log(`[api] listening on :${config.port}`);
   await connectDatabase();
+  await ensurePredefinedAdmin().catch((e) => console.error('[admin]', e.message));
   await startScheduler();
   warmBrowser();
   const shutdown = async () => {
