@@ -1,6 +1,8 @@
-/** Empty in development (Vite proxies /api). Set VITE_API_URL to the API's address when the client is hosted separately. */
-export const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
-export const apiUrl = (path: string) => `${API_BASE}/api${path}`;
+/**
+ * Always same-origin: /api is served by Vite in development and forwarded to the API by Vercel (client/vercel.json)
+ * in production. A same-origin cookie is what keeps the login working; calling the API domain directly does not.
+ */
+export const apiUrl = (path: string) => `/api${path}`;
 
 export class ApiError extends Error {
   status: number;
