@@ -188,4 +188,4 @@ Report images need Chromium. The build runs `npm run install-browser`. If the bu
 - `COOKIE_SAMESITE=none` and `COOKIE_SECURE=true` (both set in `render.yaml`) must stay as they are for cross-site login.
 - After changing `VITE_API_URL`, redeploy the website. The value is built into the site.
 
-Local development is unchanged: leave `VITE_API_URL` empty and run the API and the client as before. The environment templates are `server/.env.example` and `client/.env.example`.
+Local development is unchanged: leave `VITE_API_URL` empty and run the API and the client as before. Environment settings live in `server/.env` and `client/.env`.

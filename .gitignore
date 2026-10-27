@@ -3,3 +3,5 @@ dist/
 server/.env
 server/storage/
 *.log
+client/.env
+client/.env.local
