@@ -214,6 +214,25 @@ MotivationLogSchema.index({ status: 1, nextRetryAt: 1 });
 export const User = model('User', UserSchema);
 export const Setting = model('Setting', SettingSchema);
 export const MotivationLog = model('MotivationLog', MotivationLogSchema);
+
+/** One custom team message, sent to a verified WhatsApp group at a chosen date and time (Asia/Kolkata). */
+const ScheduledMessageSchema = new Schema({
+  text: { type: String, required: true, maxlength: 1000 },
+  destinationId: { type: Types.ObjectId, ref: 'Destination', required: true },
+  destinationLabel: String,
+  sendAt: { type: Date, required: true },
+  status: { type: String, enum: ['pending', 'sending', 'accepted', 'failed', 'cancelled'], default: 'pending' },
+  attempts: { type: Number, default: 0 },
+  error: String,
+  providerMessageId: String,
+  providerStatus: String,
+  sentAt: Date,
+  nextRetryAt: Date,
+  requestedBy: { type: Types.ObjectId, ref: 'User' },
+}, { timestamps: true });
+ScheduledMessageSchema.index({ status: 1, sendAt: 1 });
+ScheduledMessageSchema.index({ status: 1, nextRetryAt: 1 });
+export const ScheduledMessage = model('ScheduledMessage', ScheduledMessageSchema);
 export const UploadedCDR = model('UploadedCDR', UploadedCDRSchema);
 export const CdrRecord = model('CdrRecord', CdrRecordSchema);
 export const GeneratedReport = model('GeneratedReport', GeneratedReportSchema);

@@ -505,43 +505,45 @@ router.post('/settings/schedule/test', requireRole('admin'), asyncH(async (req, 
   res.json({ result, ...(await scheduleView()) });
 }));
 
-// ---------- Team motivation messages (good morning / end of day to the WhatsApp group) ----------
-const motivationMsg = z.object({
-  enabled: z.boolean(),
-  time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
-  mode: z.enum(['predefined', 'ai', 'custom']),
-  text: z.string().max(1000).nullable().optional(),
-  variant: z.number().int().min(0).max(9).nullable().optional(),
+// ---------- Team messages: custom text, sent to a WhatsApp group now or at a chosen date and time ----------
+const messageText = z.string().trim().min(1, 'Write the message first.').max(1000, 'The message is longer than 1000 characters.');
+const objectIdStr = z.string().regex(/^[a-f\d]{24}$/, 'Choose a group.');
+const motivationView = async () => ({
+  groups: await Destination.find({ kind: 'group', verified: true }).select('label').sort({ label: 1 }).lean(),
+  messages: await mot.list(100),
+  slots: await mot.getSlotTimes(),
+  timezone: config.timezone,
 });
-const motivationView = async () => {
-  const cfg = await mot.getConfig();
-  return { config: cfg, nextRuns: mot.nextRuns(cfg), history: await mot.history(50), aiEnabled: mot.aiEnabled() };
-};
 
 router.get('/motivation', asyncH(async (req, res) => res.json(await motivationView())));
 
-router.put('/motivation', requireRole('admin'), asyncH(async (req, res) => {
+router.post('/motivation/schedule', requireRole('admin'), asyncH(async (req, res) => {
   const b = z.object({
-    enabled: z.boolean(),
-    workingDays: z.array(z.number().int().min(0).max(6)).min(1).max(7),
-    destinationId: z.string().regex(/^[a-f\d]{24}$/).nullable(),
-    morning: motivationMsg,
-    eod: motivationMsg,
+    text: messageText,
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Choose a date.'),
+    slot: z.enum(['morning', 'evening'], { errorMap: () => ({ message: 'Choose Morning or Evening.' }) }),
+    destinationId: objectIdStr,
   }).parse(req.body);
-  const withText = (m) => ({ ...m, text: m.text?.trim() || '' });
-  await mot.saveConfig({ ...b, workingDays: [...new Set(b.workingDays)].sort(), morning: withText(b.morning), eod: withText(b.eod) }, req.user.id);
+  await mot.schedule({ ...b, userId: req.user.id });
+  res.status(201).json(await motivationView());
+}));
+
+router.post('/motivation/send-now', requireRole('admin'), asyncH(async (req, res) => {
+  const b = z.object({ text: messageText, destinationId: objectIdStr }).parse(req.body);
+  const msg = await mot.sendNow({ ...b, userId: req.user.id });
+  res.status(msg?.status === 'accepted' ? 201 : 200).json({ message: msg, ...(await motivationView()) });
+}));
+
+const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use a time like 09:30.');
+router.put('/motivation/slots', requireRole('admin'), asyncH(async (req, res) => {
+  const b = z.object({ morning: hhmm, evening: hhmm }).parse(req.body);
+  await mot.saveSlotTimes(b, req.user.id);
   res.json(await motivationView());
 }));
 
-router.post('/motivation/preview', requireRole('admin'), asyncH(async (req, res) => {
-  const b = z.object({ type: z.enum(['morning', 'eod']), mode: z.enum(['predefined', 'ai', 'custom']), text: z.string().max(1000).optional(), variant: z.number().int().min(0).max(9).nullable().optional() }).parse(req.body);
-  res.json({ text: await mot.composeText(b.type, { mode: b.mode, text: b.text, variant: b.variant }) });
-}));
-
-router.post('/motivation/send', requireRole('admin'), asyncH(async (req, res) => {
-  const b = z.object({ type: z.enum(['morning', 'eod', 'test']), text: z.string().max(1000).optional() }).parse(req.body);
-  const log = await mot.sendNow({ ...b, userId: req.user.id });
-  res.status(log.status === 'accepted' ? 201 : 200).json({ log, ...(await motivationView()) });
+router.delete('/motivation/messages/:id', requireRole('admin'), asyncH(async (req, res) => {
+  await mot.cancel(objectIdStr.parse(req.params.id), req.user.id);
+  res.json(await motivationView());
 }));
 
 // ---------- Delivery logs ----------

@@ -7,7 +7,7 @@ const NAV = [
   { to: '/live', label: 'Live Report', icon: Radio, live: true, hint: 'Fetch · report · send' },
   { to: '/schedule', label: 'Auto Send', icon: CalendarClock, hint: 'Daily automatic report' },
   { to: '/whatsapp', label: 'WhatsApp Setup', icon: MessageCircle, hint: 'Connect & choose groups' },
-  { to: '/motivation', label: 'Team Motivation', icon: Sparkles, hint: 'Good morning & end-of-day' },
+  { to: '/motivation', label: 'Team Messages', icon: Sparkles, hint: 'Schedule a custom message' },
   { to: '/logs', label: 'Delivery Logs', icon: ScrollText, hint: 'What was sent' },
 ];
 
