@@ -12,6 +12,15 @@ function required(name) {
 
 const isTest = process.env.NODE_ENV === 'test';
 
+// On a hosted server, a local MongoDB address is always a mistake: the server cannot see this computer's database.
+function mongoUriFor() {
+  const uri = isTest ? process.env.MONGODB_URI || '' : required('MONGODB_URI');
+  if (process.env.NODE_ENV === 'production' && /127\.0\.0\.1|localhost/.test(uri)) {
+    throw new Error('MONGODB_URI points to this computer (127.0.0.1 / localhost). On Render, set it to your MongoDB Atlas connection string in the service\'s Environment tab, then redeploy.');
+  }
+  return uri;
+}
+
 // Only "meta_cloud" switches away from the Nexsahay gateway; anything else (e.g. a session name typed here) means nexsahay.
 const rawProvider = (process.env.WHATSAPP_PROVIDER || 'nexsahay').trim().toLowerCase();
 const provider = rawProvider === 'meta_cloud' ? 'meta_cloud' : 'nexsahay';
@@ -22,7 +31,7 @@ if (!['nexsahay', 'meta_cloud'].includes(rawProvider)) {
 export const config = {
   env: process.env.NODE_ENV || 'development',
   port: Number(process.env.PORT || 4000),
-  mongoUri: isTest ? process.env.MONGODB_URI || '' : required('MONGODB_URI'),
+  mongoUri: mongoUriFor(),
   jwtSecret: isTest ? 'test-secret' : required('JWT_SECRET'),
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '12h',
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
