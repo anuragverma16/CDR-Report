@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { CheckCircle2, Clock3, Database, FileSpreadsheet, Download, ExternalLink, ImageIcon, PhoneIncoming, PhoneMissed, Phone, RefreshCw, Send, Timer, Users, Zap } from 'lucide-react';
-import { api, downloadFile, errMsg } from '../lib/api';
+import { api, apiUrl, downloadFile, errMsg } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import type { Report } from '../lib/types';
 import { fmtDuration, num, todayIST } from '../lib/format';
@@ -261,7 +261,7 @@ export default function LiveReport() {
             <section className="card p-5 xl:col-span-3">
               <h2 className="mb-3 font-semibold text-ink">WhatsApp image preview</h2>
               {rep.imageStatus === 'ready'
-                ? <a href={`/api/reports/${rep._id}/image?inline=1`} target="_blank" rel="noreferrer"><img key={rep._id} src={`/api/reports/${rep._id}/image?inline=1`} alt={`Agent report for ${result!.reportDate}`} className="w-full rounded-xl border border-slate-200" /></a>
+                ? <a href={apiUrl(`/reports/${rep._id}/image?inline=1`)} target="_blank" rel="noreferrer"><img key={rep._id} src={apiUrl(`/reports/${rep._id}/image?inline=1`)} alt={`Agent report for ${result!.reportDate}`} className="w-full rounded-xl border border-slate-200" /></a>
                 : <Alert kind="warning" title="Image not available">{rep.imageError || 'The PNG could not be rendered.'} You can still send the Excel file.</Alert>}
             </section>
             <section className="card border-emerald-500/25 p-5 xl:col-span-2">

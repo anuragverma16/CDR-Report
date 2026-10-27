@@ -8,6 +8,15 @@ import { randomName } from '../services/storage.js';
 
 export const COOKIE = 'tdr_session';
 
+/**
+ * Session cookie flags. Browsers only accept SameSite=None cookies that are also Secure, so the
+ * cross-domain setup (client and API on different hosts) forces Secure whenever SameSite=None.
+ */
+export function cookieOptions(maxAge) {
+  const sameSite = ['lax', 'strict', 'none'].includes(config.cookieSameSite) ? config.cookieSameSite : 'lax';
+  return { httpOnly: true, sameSite, secure: config.cookieSecure || sameSite === 'none', ...(maxAge && { maxAge }) };
+}
+
 export function signSession(user) {
   return jwt.sign({ sub: String(user._id), role: user.role }, config.jwtSecret, { expiresIn: config.jwtExpiresIn });
 }

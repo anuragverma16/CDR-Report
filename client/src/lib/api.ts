@@ -1,3 +1,7 @@
+/** Empty in development (Vite proxies /api). Set VITE_API_URL to the API's address when the client is hosted separately. */
+export const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
+export const apiUrl = (path: string) => `${API_BASE}/api${path}`;
+
 export class ApiError extends Error {
   status: number;
   details?: string[];
@@ -15,7 +19,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     init.body = JSON.stringify(body);
     (init.headers as Record<string, string>)['Content-Type'] = 'application/json';
   }
-  const res = await fetch(`/api${path}`, init);
+  const res = await fetch(apiUrl(path), init);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     if (res.status === 401 && path !== '/auth/login' && path !== '/auth/me') window.dispatchEvent(new Event('tdr:unauthorized'));
@@ -33,7 +37,7 @@ export const api = {
 
 /** Download a protected file via fetch (keeps cookie auth) and save it with the server-provided name. */
 export async function downloadFile(path: string, fallbackName: string) {
-  const res = await fetch(`/api${path}`, { credentials: 'include' });
+  const res = await fetch(apiUrl(path), { credentials: 'include' });
   if (!res.ok) {
     const j = await res.json().catch(() => ({}));
     throw new ApiError(j.error || `Download failed (${res.status})`, res.status);

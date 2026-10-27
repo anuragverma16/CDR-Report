@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { ensureStorage } from './services/storage.js';
 import { startScheduler } from './services/scheduler.js';
-import { closeBrowser } from './services/image.js';
+import { closeBrowser, warmBrowser } from './services/image.js';
 import { closeMysql } from './services/mysqlSource.js';
 import { errorHandler, originCheck } from './middleware/index.js';
 import api from './routes/api.js';
@@ -22,6 +22,8 @@ export function createApp() {
   app.set('trust proxy', 1);
   app.disable('x-powered-by');
   app.use(helmet({
+    // Report images are loaded by the client from the API's domain when the two are deployed separately
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
     contentSecurityPolicy: {
       directives: {
         'img-src': ["'self'", 'data:', 'blob:'],
@@ -63,6 +65,7 @@ async function main() {
   });
   console.log(`[api] listening on :${config.port}`);
   await startScheduler();
+  warmBrowser();
   const shutdown = async () => {
     server.close();
     await closeBrowser();

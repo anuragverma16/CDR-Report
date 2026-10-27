@@ -27,6 +27,8 @@ export const config = {
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '12h',
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
   cookieSecure: process.env.COOKIE_SECURE === 'true',
+  // lax for one domain (localhost, or a reverse proxy); none when the client is on another domain (e.g. Render static site)
+  cookieSameSite: (process.env.COOKIE_SAMESITE || 'lax').toLowerCase(),
   storageDir: path.resolve(process.env.STORAGE_DIR || path.join(__dirname, '..', 'storage')),
   maxUploadMb: Number(process.env.MAX_UPLOAD_MB || 25),
   maxFilesPerUpload: Number(process.env.MAX_FILES_PER_UPLOAD || 10),

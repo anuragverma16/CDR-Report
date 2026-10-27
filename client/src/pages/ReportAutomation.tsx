@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { BarChart3, Database, Download, FileSpreadsheet, ImageIcon, UploadCloud } from 'lucide-react';
-import { api, downloadFile, errMsg } from '../lib/api';
+import { api, apiUrl, downloadFile, errMsg } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import type { Report } from '../lib/types';
 import { Alert, Badge, PageHeader, Section, Spinner } from '../components/ui';
@@ -102,7 +102,7 @@ export default function ReportAutomation() {
             <div className="grid items-start gap-6 xl:grid-cols-2">
               <div>
                 {rep.imageStatus === 'ready'
-                  ? <a href={`/api/reports/${rep._id}/image?inline=1`} target="_blank" rel="noreferrer"><img src={`/api/reports/${rep._id}/image?inline=1`} alt="Agent report" className="w-full rounded-lg border border-slate-200 shadow-sm" /></a>
+                  ? <a href={apiUrl(`/reports/${rep._id}/image?inline=1`)} target="_blank" rel="noreferrer"><img src={apiUrl(`/reports/${rep._id}/image?inline=1`)} alt="Agent report" className="w-full rounded-lg border border-slate-200 shadow-sm" /></a>
                   : <Alert kind="warning" title="Image not available">{rep.imageError || 'The PNG could not be rendered.'} You can still send the Excel file.</Alert>}
                 <div className="mt-3 flex flex-wrap gap-2">
                   {rep.imageStatus === 'ready' && <button className="btn-secondary" onClick={() => downloadFile(`/reports/${rep._id}/image`, 'report.png').catch((e) => setGenError(errMsg(e)))}><ImageIcon className="h-4 w-4" /> Download PNG</button>}

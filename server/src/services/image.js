@@ -77,6 +77,11 @@ async function getBrowser() {
   return browserPromise;
 }
 
+/** Start the browser ahead of time so the first scheduled report does not wait for it. Failures are left for the render to report. */
+export function warmBrowser() {
+  getBrowser().catch(() => {});
+}
+
 export async function closeBrowser() {
   if (browserPromise) { const b = await browserPromise.catch(() => null); browserPromise = null; await b?.close(); }
 }

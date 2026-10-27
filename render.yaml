@@ -1,0 +1,76 @@
+# Render Blueprint for the API (server/). The website (client/) is deployed on Vercel, see README.md.
+# In Render: New → Blueprint → select this repository, then fill in every variable marked sync: false.
+
+services:
+  - type: web
+    name: tata-dialer-api
+    runtime: node
+    region: singapore
+    plan: starter            # a persistent disk needs a paid plan
+    rootDir: server
+    buildCommand: npm ci && npm run install-browser
+    startCommand: npm start
+    healthCheckPath: /api/health
+    disk:
+      name: tata-dialer-storage
+      mountPath: /var/data/storage
+      sizeGB: 5
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: NODE_ENV
+        value: production
+      - key: MONGODB_URI
+        sync: false          # MongoDB Atlas connection string
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 12h
+      - key: CORS_ORIGIN
+        sync: false          # the Vercel website address, e.g. https://tata-dialer.vercel.app (comma-separate several)
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: COOKIE_SAMESITE
+        value: none          # the website and the API are on different domains
+      - key: TRUST_PROXY
+        value: "1"
+      - key: APP_TIMEZONE
+        value: Asia/Kolkata
+      - key: STORAGE_DIR
+        value: /var/data/storage
+      - key: MAX_UPLOAD_MB
+        value: "25"
+      - key: MAX_FILES_PER_UPLOAD
+        value: "10"
+      - key: MAX_ROWS_PER_FILE
+        value: "500000"
+      - key: MYSQL_HOST
+        sync: false
+      - key: MYSQL_PORT
+        value: "3306"
+      - key: MYSQL_USER
+        sync: false
+      - key: MYSQL_PASSWORD
+        sync: false
+      - key: MYSQL_DATABASE
+        sync: false
+      - key: MYSQL_ANSWERED_TABLE
+        value: answered_calls
+      - key: MYSQL_MISSED_TABLE
+        value: missed_calls
+      - key: MYSQL_DISPOSITIONS_TABLE
+        value: call_dispositions
+      - key: WHATSAPP_PROVIDER
+        value: nexsahay
+      - key: NEXSAHAY_API_BASE
+        value: https://whatsappbackend.sengarinfotech.com/api
+      - key: NEXSAHAY_API_KEY
+        sync: false
+      - key: NEXSAHAY_SESSION_ID
+        sync: false
+      - key: DELIVERY_MAX_ATTEMPTS
+        value: "3"
+      - key: DELIVERY_RETRY_DELAY_MINUTES
+        value: "10"
+      - key: ANTHROPIC_API_KEY
+        sync: false          # optional: AI wording for team messages

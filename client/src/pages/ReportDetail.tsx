@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, Download, ImageIcon, RefreshCw } from 'lucide-react';
-import { api, downloadFile, errMsg } from '../lib/api';
+import { api, apiUrl, downloadFile, errMsg } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import type { DeliveryLog, Report } from '../lib/types';
 import { fmtDateTime } from '../lib/format';
@@ -78,12 +78,12 @@ export default function ReportDetail() {
         <Section title="Report image (PNG)">
           {report.imageStatus === 'ready' && !imgUnavailable ? (
             <>
-              <a href={`/api/reports/${id}/image?inline=1`} target="_blank" rel="noreferrer">
-                <img key={imgKey} src={`/api/reports/${id}/image?inline=1&v=${imgKey}`} onError={() => setImgUnavailable(true)} alt="Generated agent report" className="w-full rounded-lg border border-slate-200 shadow-sm" />
+              <a href={apiUrl(`/reports/${id}/image?inline=1`)} target="_blank" rel="noreferrer">
+                <img key={imgKey} src={apiUrl(`/reports/${id}/image?inline=1&v=${imgKey}`)} onError={() => setImgUnavailable(true)} alt="Generated agent report" className="w-full rounded-lg border border-slate-200 shadow-sm" />
               </a>
               <div className="mt-3 flex gap-2">
                 <button className="btn-primary" onClick={() => dl('image')} disabled={!!busy}><Download className="h-4 w-4" /> {busy === 'image' ? 'Downloading…' : 'Download PNG'}</button>
-                <a href={`/api/reports/${id}/image?inline=1`} target="_blank" rel="noreferrer" className="btn-secondary">Open full size</a>
+                <a href={apiUrl(`/reports/${id}/image?inline=1`)} target="_blank" rel="noreferrer" className="btn-secondary">Open full size</a>
               </div>
             </>
           ) : (

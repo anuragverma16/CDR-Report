@@ -8,7 +8,7 @@ import { fmtDateTime } from '../lib/format';
 import { Alert, Badge, PageHeader, Section, Spinner, StatusBadge } from '../components/ui';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-interface View { schedule: Schedule; cron: string; nextRunAt: string | null; whatsappConfigured: boolean }
+interface View { schedule: Schedule; crons: string[]; nextRunAt: string | null; whatsappConfigured: boolean }
 
 export default function ScheduleSettings() {
   const { can } = useAuth();
@@ -41,7 +41,7 @@ export default function ScheduleSettings() {
     setMsg(null);
     try {
     const v = await api.put<View>('/settings/schedule', {
-        enabled: s.enabled, time: s.time, timezone: s.timezone, frequency: s.frequency, days: s.days, reportDay: s.reportDay, fixedDate: s.reportDay === 'fixed' ? s.fixedDate : null,
+        enabled: s.enabled, times: s.times, timezone: s.timezone, frequency: s.frequency, days: s.days, reportDay: s.reportDay, fixedDate: s.reportDay === 'fixed' ? s.fixedDate : null,
         mode: 'single', fileIds: [], attachments: s.attachments, destinationIds: s.destinationIds,
       });
       setView(v); setS(v.schedule);
@@ -64,7 +64,7 @@ export default function ScheduleSettings() {
     <>
       <PageHeader title="Auto Send" subtitle="At the set time the server fetches the calls from MySQL, builds the report and sends it to your selected WhatsApp groups or numbers. No browser needs to be open." />
       <div className="mb-6 grid gap-3 sm:grid-cols-3">
-        <div className="card p-4"><div className="label">Next scheduled run</div><div className="font-semibold">{s.enabled ? fmtDateTime(view.nextRunAt) : 'Automation off'}</div><div className="text-xs text-slate-400">cron “{view.cron}” · {s.timezone}</div></div>
+        <div className="card p-4"><div className="label">Next scheduled run</div><div className="font-semibold">{s.enabled ? fmtDateTime(view.nextRunAt) : 'Automation off'}</div><div className="text-xs text-slate-400">Runs at {s.times.join(' and ')} · {s.timezone}</div></div>
         <div className="card p-4"><div className="label">Last execution</div><div className="font-semibold">{fmtDateTime(s.lastRunAt)}</div></div>
         <div className="card p-4"><div className="label">Last status</div><StatusBadge status={s.lastRunStatus} /><div className="mt-1 line-clamp-3 text-xs text-slate-500">{s.lastRunMessage}</div>{s.lastReportId && <Link className="text-xs text-vol underline" to={`/reports/${s.lastReportId}`}>Open report</Link>}</div>
       </div>
@@ -78,7 +78,18 @@ export default function ScheduleSettings() {
             <span className="font-medium">{s.enabled ? 'Automation enabled' : 'Automation disabled'}</span>
           </label>
           <div className="grid gap-4 sm:grid-cols-3">
-            <div><label className="label">Time</label><input type="time" className="input" value={s.time} onChange={(e) => set({ time: e.target.value })} /></div>
+            <div>
+              <label className="label">Report times</label>
+              <div className="space-y-2">
+                {s.times.map((t, i) => (
+                  <div key={i} className="flex gap-2">
+                    <input type="time" className="input" value={t} onChange={(e) => set({ times: s.times.map((x, j) => (j === i ? e.target.value : x)) })} />
+                    {s.times.length > 1 && <button type="button" className="btn-secondary px-3" onClick={() => set({ times: s.times.filter((_, j) => j !== i) })}>Remove</button>}
+                  </div>
+                ))}
+                {s.times.length < 4 && <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={() => set({ times: [...s.times, '18:00'] })}>+ Add time</button>}
+              </div>
+            </div>
             <div><label className="label">Timezone</label><input className="input" value={s.timezone} onChange={(e) => set({ timezone: e.target.value })} /></div>
             <div><label className="label">Frequency</label>
               <select className="input" value={s.frequency} onChange={(e) => set({ frequency: e.target.value as Schedule['frequency'] })}>

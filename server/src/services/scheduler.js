@@ -12,19 +12,26 @@ import { motivationTick } from './motivation.js';
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
-let mainTask = null;
+let mainTasks = [];
 let retryTask = null;
 let motivationTask = null;
 
-export function cronFor(s) {
-  const [h, m] = s.time.split(':').map(Number);
+/** The run times of a schedule ("HH:mm"), earliest first. A schedule can run several times a day. */
+export function scheduleTimes(s) {
+  const list = s.times?.length ? s.times : [s.time];
+  return [...new Set(list)].sort();
+}
+
+export function cronFor(s, time = scheduleTimes(s)[0]) {
+  const [h, m] = time.split(':').map(Number);
   const dow = s.frequency === 'daily' ? '*' : s.frequency === 'weekdays' ? '1-5' : (s.days?.length ? [...s.days].sort().join(',') : '*');
   return `${m} ${h} * * ${dow}`;
 }
 
-export function nextRun(s, from = new Date()) {
-  if (!s.enabled) return null;
-  const [h, m] = s.time.split(':').map(Number);
+export const cronsFor = (s) => scheduleTimes(s).map((t) => cronFor(s, t));
+
+function nextRunAt(s, time, from) {
+  const [h, m] = time.split(':').map(Number);
   const allowed = s.frequency === 'daily' ? [0, 1, 2, 3, 4, 5, 6] : s.frequency === 'weekdays' ? [1, 2, 3, 4, 5] : s.days || [];
   if (!allowed.length) return null;
   let d = dayjs(from).tz(s.timezone).hour(h).minute(m).second(0).millisecond(0);
@@ -33,6 +40,13 @@ export function nextRun(s, from = new Date()) {
     d = d.add(1, 'day').hour(h).minute(m);
   }
   return null;
+}
+
+/** Earliest upcoming run across all of the schedule's times. */
+export function nextRun(s, from = new Date()) {
+  if (!s.enabled) return null;
+  const next = scheduleTimes(s).map((t) => nextRunAt(s, t, from)).filter(Boolean);
+  return next.length ? new Date(Math.min(...next.map((d) => d.getTime()))) : null;
 }
 
 export async function getSchedule() {
@@ -58,11 +72,13 @@ async function filesFor(s, date) {
  * One scheduled execution. `runKey` makes it idempotent: a unique index on ScheduleRun guarantees
  * the same slot never runs twice (restart, several instances, or a manual test with the same key).
  */
-export async function executeSchedule({ test = false } = {}) {
+export async function executeSchedule({ test = false, slot = null } = {}) {
   const s = await getSchedule();
   const now = new Date();
   const date = reportDateFor(s, now);
-  const runKey = test ? `test:${now.toISOString()}` : `${dayjs(now).tz(s.timezone).format('YYYY-MM-DD')}T${s.time}`;
+  const runTime = slot || scheduleTimes(s)[0];
+  // one run per time slot per day: a restart or a second instance cannot send the same slot twice
+  const runKey = test ? `test:${now.toISOString()}` : `${dayjs(now).tz(s.timezone).format('YYYY-MM-DD')}T${runTime}`;
   try {
     await ScheduleRun.create({ runKey, startedAt: now, status: 'running' });
   } catch (e) {
@@ -111,10 +127,13 @@ export async function startScheduler() {
 
 /** (Re)register the cron job from the schedule stored in MongoDB. Called at boot and after every change. */
 export async function reloadSchedule() {
-  if (mainTask) { mainTask.stop(); mainTask.destroy?.(); mainTask = null; }
+  for (const t of mainTasks) { t.stop(); t.destroy?.(); }
+  mainTasks = [];
   const s = await getSchedule();
   if (!s.enabled) return null;
-  mainTask = cron.schedule(cronFor(s), () => executeSchedule().catch((e) => console.error('[schedule]', e)), { timezone: s.timezone, name: 'daily-report' });
-  console.log(`[schedule] active: "${cronFor(s)}" ${s.timezone}, next ${nextRun(s)?.toISOString()}`);
-  return mainTask;
+  for (const time of scheduleTimes(s)) {
+    mainTasks.push(cron.schedule(cronFor(s, time), () => executeSchedule({ slot: time }).catch((e) => console.error('[schedule]', e)), { timezone: s.timezone, name: `daily-report-${time}` }));
+  }
+  console.log(`[schedule] active at ${scheduleTimes(s).join(', ')} ${s.timezone}, next ${nextRun(s)?.toISOString()}`);
+  return mainTasks;
 }

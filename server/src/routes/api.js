@@ -9,11 +9,11 @@ import fs from 'node:fs';
 import { z } from 'zod';
 import { config, whatsappConfigured } from '../config.js';
 import { User, UploadedCDR, GeneratedReport, Destination, DeliveryLog, ColumnMapping, CdrRecord, AutomationUpload, ROLES, audit } from '../models/index.js';
-import { requireAuth, requireRole, signSession, COOKIE, cdrUpload, asyncH } from '../middleware/index.js';
+import { requireAuth, requireRole, signSession, COOKIE, cookieOptions, cdrUpload, asyncH } from '../middleware/index.js';
 import { handleUploads, previewFile, processFile, deleteFile, importForReport } from '../services/cdrService.js';
 import { generateReport, retryImage, dashboardSummary } from '../services/reportService.js';
 import { sendReport, retryDelivery, newVerificationCode, hashCode, buildMessageText } from '../services/deliveryService.js';
-import { getSchedule, reloadSchedule, executeSchedule, nextRun, cronFor } from '../services/scheduler.js';
+import { getSchedule, reloadSchedule, executeSchedule, nextRun, cronsFor, scheduleTimes } from '../services/scheduler.js';
 import { storagePath } from '../services/storage.js';
 import * as mot from '../services/motivation.js';
 import { mysqlStatus, fetchLiveReport } from '../services/mysqlSource.js';
@@ -50,12 +50,12 @@ router.post('/auth/login', loginLimiter, asyncH(async (req, res) => {
   if (!user || !user.active || !(await bcrypt.compare(password, user.passwordHash))) return res.status(401).json({ error: 'Invalid email or password' });
   user.lastLoginAt = new Date();
   await user.save();
-  res.cookie(COOKIE, signSession(user), { httpOnly: true, sameSite: 'lax', secure: config.cookieSecure, maxAge: 12 * 3600 * 1000 });
+  res.cookie(COOKIE, signSession(user), cookieOptions(12 * 3600 * 1000));
   await audit(user._id, 'auth.login', user.email);
   res.json({ user: { id: user._id, email: user.email, name: user.name, role: user.role } });
 }));
 
-router.post('/auth/logout', (req, res) => { res.clearCookie(COOKIE); res.json({ ok: true }); });
+router.post('/auth/logout', (req, res) => { res.clearCookie(COOKIE, cookieOptions()); res.json({ ok: true }); });
 
 router.use(requireAuth);
 
@@ -462,14 +462,14 @@ router.delete('/whatsapp/destinations/:id', requireRole('admin'), asyncH(async (
 // ---------- Schedule ----------
 async function scheduleView() {
   const s = (await getSchedule()).toObject();
-  return { schedule: s, cron: cronFor(s), nextRunAt: nextRun(s), whatsappConfigured: whatsappConfigured() };
+  return { schedule: s, crons: cronsFor(s), nextRunAt: nextRun(s), whatsappConfigured: whatsappConfigured() };
 }
 router.get('/settings/schedule', asyncH(async (req, res) => res.json(await scheduleView())));
 
 router.put('/settings/schedule', requireRole('admin'), asyncH(async (req, res) => {
   const b = z.object({
     enabled: z.boolean(),
-    time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+    times: z.array(z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/)).min(1).max(4),
     timezone: z.string().min(1).max(60).refine((tz) => { try { Intl.DateTimeFormat('en', { timeZone: tz }); return true; } catch { return false; } }, 'unknown timezone'),
     frequency: z.enum(['daily', 'weekdays', 'custom']),
     days: z.array(z.number().int().min(0).max(6)).max(7),
@@ -489,6 +489,9 @@ router.put('/settings/schedule', requireRole('admin'), asyncH(async (req, res) =
   const bad = dests.filter((d) => !d.verified);
   if (bad.length) return res.status(422).json({ error: `Only verified destinations can be scheduled. Not verified: ${bad.map((d) => d.label).join(', ')}` });
   b.destinationIds = dests.map((d) => String(d._id));
+  if (new Set(b.times).size !== b.times.length) return res.status(400).json({ error: 'Each report time must be different.' });
+  b.times = [...b.times].sort();
+  b.time = b.times[0];
   const s = await getSchedule();
   Object.assign(s, b, { updatedBy: req.user.id });
   await s.save();

@@ -51,6 +51,17 @@ export async function closeMysql() {
 
 const cleanName = (s) => String(s).replace(/\s+/g, ' ').trim();
 
+// Column lists change rarely: remember them for a few minutes instead of asking information_schema on every fetch
+const COLUMN_CACHE_MS = 5 * 60 * 1000;
+const columnCache = new Map();
+async function describeTableCached(table) {
+  const hit = columnCache.get(table);
+  if (hit && Date.now() - hit.at < COLUMN_CACHE_MS) return hit.columns;
+  const columns = await describeTable(table);
+  columnCache.set(table, { at: Date.now(), columns });
+  return columns;
+}
+
 async function describeTable(table) {
   const [cols] = await getPool().query(
     'SELECT COLUMN_NAME AS name, DATA_TYPE AS type FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION',
@@ -70,7 +81,7 @@ async function layout() {
     { kind: 'answered', label: 'Answered', name: config.mysql.answeredTable },
     { kind: 'missed', label: 'Missed', name: config.mysql.missedTable },
   ];
-  for (const t of tables) t.columns = await describeTable(t.name);
+  for (const t of tables) t.columns = await describeTableCached(t.name);
   const headers = [];
   const seen = new Set();
   for (const t of tables) for (const c of t.columns) {
@@ -158,19 +169,32 @@ function csvCell(v) {
   return /[",;\t|]|^\s|\s$/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
+/** Per-stage timings of one fetch, written to the server log so slow steps are visible. */
+function stageTimer(label) {
+  let last = Date.now();
+  return (step) => { const now = Date.now(); console.log(`[fetch ${label}] ${step} ${((now - last) / 1000).toFixed(2)}s`); last = now; };
+}
+
 async function fetchRows(date, enrich) {
+  const mark = stageTimer(`${date} rows`);
   const { tables, headers, mapping, derive, missing } = await layout();
+  mark('layout');
   if (missing.length) throw httpError(422, `These report columns could not be found in ${tables.map((t) => t.name).join(' / ')}: ${missing.join(', ')}. Columns available: ${headers.join(', ')}.`);
   const next = dayjs(date).add(1, 'day').format('YYYY-MM-DD');
-  for (const t of tables) {
+  // Answered and missed tables are read at the same time (independent queries)
+  await Promise.all(tables.map(async (t) => {
     const where = t.timeExpr ? `WHERE ${t.timeExpr} >= ? AND ${t.timeExpr} < ?` : '';
     const [rows] = await getPool().query({ sql: `SELECT * FROM ${mysql.escapeId(t.name)} ${where} LIMIT ${MAX_ROWS + 1}`, timeout: 60000 }, [date, next]);
     if (rows.length > MAX_ROWS) throw httpError(422, `${t.name} returned more than ${MAX_ROWS} rows for ${date}. Raise MAX_ROWS_PER_FILE or narrow the data.`);
     t.rows = rows;
-  }
+  }));
   const ids = tables.flatMap((t) => t.rows.map((r) => r[t.columns.find((c) => c.header === mapping.callId)?.name])).filter((v) => !blank(v));
+  mark('calls query');
   const dbDispositions = await loadDbDispositions(ids);
-  return { ...buildSnapshot(tables, headers, mapping, derive, enrich, dbDispositions), filteredInSql: tables.every((t) => t.timeExpr), tables: tables.map((t) => t.name) };
+  mark('dispositions query');
+  const snapshot = buildSnapshot(tables, headers, mapping, derive, enrich, dbDispositions);
+  mark('snapshot csv');
+  return { ...snapshot, filteredInSql: tables.every((t) => t.timeExpr), tables: tables.map((t) => t.name) };
 }
 
 const blank = (v) => v === null || v === undefined || String(v).trim() === '';
@@ -187,8 +211,9 @@ async function loadDbDispositions(callIds) {
   if (!table || !callIds.length) return out;
   const [[exists]] = await getPool().query('SELECT COUNT(*) AS n FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?', [config.mysql.database, table]);
   if (!exists.n) return out;
-  for (let i = 0; i < callIds.length; i += 1000) {
-    const [rows] = await getPool().query(`SELECT * FROM ${mysql.escapeId(table)} WHERE call_id IN (?) ORDER BY id`, [callIds.slice(i, i + 1000)]);
+  // One round trip per 5000 IDs: each query to the database costs a network round trip, so fewer is faster
+  for (let i = 0; i < callIds.length; i += 5000) {
+    const [rows] = await getPool().query(`SELECT * FROM ${mysql.escapeId(table)} WHERE call_id IN (?) ORDER BY id`, [callIds.slice(i, i + 5000)]);
     for (const r of rows) { // ordered by id: a later re-disposition of the same call wins
       const secs = (v) => (blank(v) || !Number.isFinite(Number(v)) ? null : Number(v));
       out.set(callKey(r.call_id), { name: dispositionName(r), holdSec: secs(r.hold_time), wrapSec: secs(r.wrap_up_time) });
@@ -372,11 +397,14 @@ export function fetchLiveReport({ date, user = null, trigger = 'manual' }) {
   const run = previous.catch(() => {}).then(async () => {
     const actor = user || { id: null };
     const fetchedAt = new Date();
+    const mark = stageTimer(date);
     let pulled;
     let enrich = null;
     try {
       enrich = await loadExportFor(date);
+      mark('export lookup');
       pulled = await fetchRows(date, enrich);
+      mark('mysql rows');
     } catch (e) {
       if (e.status) throw e;
       throw httpError(502, `MySQL query failed: ${e.message}`);
@@ -408,11 +436,14 @@ export function fetchLiveReport({ date, user = null, trigger = 'manual' }) {
       preview = await previewFile(file._id, { mapping: file.mapping, options: file.options, classification: file.classification });
       file = file.toObject();
     }
+    mark('upload, preview and save');
     await dropOlderSnapshots(date, file._id);
+    mark('drop older snapshots');
 
     // Nothing changed since the last fetch: hand back that report instead of building an identical one
     const unchanged = reused && await GeneratedReport.findOne({ fileIds: [file._id], reportDate: date, type: 'single' }).sort({ createdAt: -1 });
     const report = unchanged || await generateReport({ type: 'single', fileIds: [file._id], reportDate: date, restrictToDate: true, userId: actor.id, trigger });
+    mark(unchanged ? 'reused report' : 'report, excel and image');
     await audit(actor.id, 'mysql.fetch', String(report._id), { date, ...counts, reused, newReport: !unchanged });
     return {
       report: report.toObject(),

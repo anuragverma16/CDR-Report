@@ -88,7 +88,8 @@ const GeneratedReportSchema = new Schema({
 const ScheduleSchema = new Schema({
   key: { type: String, default: 'default', unique: true },
   enabled: { type: Boolean, default: false },
-  time: { type: String, default: '19:00' }, // HH:mm
+  time: { type: String, default: '19:00' }, // HH:mm, kept in step with times[0]
+  times: { type: [String], default: ['12:30', '18:00'] }, // HH:mm, one report run at each
   timezone: { type: String, default: 'Asia/Kolkata' },
   frequency: { type: String, enum: ['daily', 'weekdays', 'custom'], default: 'daily' },
   days: { type: [Number], default: [1, 2, 3, 4, 5] }, // 0=Sun..6=Sat, for custom

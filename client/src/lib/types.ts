@@ -105,7 +105,7 @@ export interface WhatsAppGroup { jid: string; name: string; phoneNumber?: string
 export interface GatewaySession { id: string; name: string; status: string; hasApiKey: boolean }
 export interface GatewayMessage { id: string; to: string | null; body: string | null; type: string | null; status: string | null; at: string | null }
 export interface Schedule {
-  enabled: boolean; time: string; timezone: string; frequency: 'daily' | 'weekdays' | 'custom'; days: number[];
+  enabled: boolean; time: string; times: string[]; timezone: string; frequency: 'daily' | 'weekdays' | 'custom'; days: number[];
   reportDay: 'today' | 'previous' | 'fixed'; fixedDate?: string | null; mode: 'single' | 'combined'; fileIds: string[];
   attachments: 'excel' | 'png' | 'both'; destinationIds: string[]; lastRunAt?: string; lastRunStatus?: string; lastRunMessage?: string; lastReportId?: string;
 }
