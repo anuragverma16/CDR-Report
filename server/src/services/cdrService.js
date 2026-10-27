@@ -91,7 +91,9 @@ export async function previewFile(fileId, { mapping, options, classification }) 
   const first = normalizeRows(parsed.rows, { mapping, options: opts, classification: classification || {}, tz: config.timezone });
   const existing = await existingKeysFor(first.records, file._id);
   const summary = summarizeRecords(first.records, existing);
-  const suggested = suggestClassification(summary.statuses.map((s) => s.value), summary.dispositions.map((d) => d.value));
+  // Suggest from every valid row, including ones already imported: a re-fetch of the same calls must still get its dispositions
+  const all = summarizeRecords(first.records);
+  const suggested = suggestClassification(all.statuses.map((s) => s.value), all.dispositions.map((d) => d.value));
   const cls = classification || suggested;
   const { records } = normalizeRows(parsed.rows, { mapping, options: opts, classification: cls, tz: config.timezone });
   const unclassified = summary.statuses.filter((s) => !cls.status?.answered?.includes(s.value) && !cls.status?.missed?.includes(s.value));

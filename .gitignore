@@ -5,3 +5,5 @@ server/storage/
 *.log
 client/.env
 client/.env.local
+
+.playwright-browsers/

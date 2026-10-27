@@ -414,6 +414,11 @@ export function fetchLiveReport({ date, user = null, trigger = 'manual' }) {
 
     const sha256 = crypto.createHash('sha256').update(csv).digest('hex');
     let file = await UploadedCDR.findOne({ sha256, source: 'mysql', status: 'processed' }).sort({ processedAt: -1 });
+    // A stored snapshot whose CSV file is gone cannot be previewed: build a fresh one instead of failing
+    if (file && !(await fs.access(storagePath('uploads', file.storedName)).then(() => true, () => false))) file = null;
+    // A snapshot saved without any disposition categories (built before disposition suggestions worked) is rebuilt
+    // when this day has dispositions, so its Interested / Not Interested / Call Back / Answered columns are filled in
+    if (file && counts.dbDispositions > 0 && !Object.values(file.classification?.disposition || {}).some((v) => v?.length)) file = null;
     const reused = Boolean(file);
     let preview;
     if (!file) {

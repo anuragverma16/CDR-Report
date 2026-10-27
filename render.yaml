@@ -16,6 +16,9 @@ services:
       mountPath: /var/data/storage
       sizeGB: 5
     envVars:
+      # Keep the Chromium used for report images inside the project, so the build's install is found when the server starts
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: /opt/render/project/src/.playwright-browsers
       - key: NODE_VERSION
         value: "20"
       - key: NODE_ENV
