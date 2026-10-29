@@ -2,12 +2,13 @@ import cron from 'node-cron';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc.js';
 import timezone from 'dayjs/plugin/timezone.js';
-import { ReportSchedule, ScheduleRun, UploadedCDR, GeneratedReport, audit } from '../models/index.js';
+import { ReportSchedule, ScheduleRun, UploadedCDR, GeneratedReport, Destination, audit } from '../models/index.js';
 import { config, mysqlConfigured } from '../config.js';
 import { fetchLiveReport } from './mysqlSource.js';
 import { generateReport } from './reportService.js';
 import { sendReport, processDueRetries } from './deliveryService.js';
 import { motivationTick } from './motivation.js';
+import { birthdayTick } from './birthdays.js';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -15,6 +16,7 @@ dayjs.extend(timezone);
 let mainTasks = [];
 let retryTask = null;
 let motivationTask = null;
+let birthdayTask = null;
 
 /** The run times of a schedule ("HH:mm"), earliest first. A schedule can run several times a day. */
 export function scheduleTimes(s) {
@@ -52,6 +54,10 @@ export function nextRun(s, from = new Date()) {
 export async function getSchedule() {
   let s = await ReportSchedule.findOne({ key: 'default' });
   if (!s) s = await ReportSchedule.create({ key: 'default' });
+  if (!s.destinationIds?.length) {
+    const preferredGroup = await Destination.findOne({ kind: 'group', verified: true, label: /^Test Controller$/i }).select('_id').lean();
+    if (preferredGroup) { s.destinationIds = [preferredGroup._id]; await s.save(); }
+  }
   return s;
 }
 
@@ -123,6 +129,7 @@ export async function startScheduler() {
   await reloadSchedule();
   if (!retryTask) retryTask = cron.schedule('* * * * *', () => processDueRetries().catch((e) => console.error('[retry]', e)), { name: 'delivery-retries' });
   if (!motivationTask) motivationTask = cron.schedule('* * * * *', () => motivationTick().catch((e) => console.error('[motivation]', e)), { timezone: config.timezone, name: 'team-motivation' });
+  if (!birthdayTask) birthdayTask = cron.schedule('* * * * *', () => birthdayTick().catch((e) => console.error('[birthdays]', e)), { timezone: config.timezone, name: 'employee-birthdays' });
 }
 
 /** (Re)register the cron job from the schedule stored in MongoDB. Called at boot and after every change. */

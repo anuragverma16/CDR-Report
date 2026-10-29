@@ -15,6 +15,7 @@ import { Setting } from '../models/index.js';
 
 export const PROVIDER = 'nexsahay';
 export const SESSION_SETTING_KEY = 'whatsapp.nexsahay.sessionId';
+const TARGET_SESSION_NAME = 'Nexsahay Controller';
 
 export class ProviderError extends Error {
   constructor(message, { code, httpStatus, retryable, details } = {}) {
@@ -56,7 +57,7 @@ export async function listSessions() {
   const body = await getJson('/sessions', 'List sessions', 10000);
   const sessions = Array.isArray(body.data) ? body.data : Array.isArray(body.data?.sessions) ? body.data.sessions : null;
   if (!sessions) throw new ProviderError('Nexsahay returned an unexpected sessions response. Check NEXSAHAY_API_BASE.', { retryable: false });
-  return sessions;
+  return sessions.filter((s) => shortSessionName(s.name).trim().toLowerCase() === TARGET_SESSION_NAME.toLowerCase());
 }
 
 /** Single session incl. the QR data URL while it is pairing (status QR_READY). */
@@ -83,18 +84,12 @@ const isConnected = (s) => String(s?.status).toUpperCase() === 'CONNECTED';
 export async function getActiveSession() {
   const chosenId = await selectedSessionId();
   const sessions = await listSessions();
-  if (chosenId) {
-    const chosen = sessions.find((s) => s.id === chosenId);
-    if (!chosen) throw new ProviderError(`The selected WhatsApp session (${chosenId}) no longer exists on the gateway. Pick another session on the WhatsApp page.`, { retryable: false });
-    if (!isConnected(chosen)) {
-      throw new ProviderError(`WhatsApp session "${shortSessionName(chosen.name)}" is ${chosen.status}, not CONNECTED. ${String(chosen.status).toUpperCase() === 'QR_READY' ? 'Open the WhatsApp page, click "Show QR" and scan it with WhatsApp on your phone (Linked devices).' : 'Its phone has unlinked. On the WhatsApp page, click "Add number", then scan the new QR code with WhatsApp on that phone (Linked devices).'}`, { retryable: false });
-    }
-    return chosen;
+  const chosen = sessions.find((s) => s.id === chosenId) || sessions[0];
+  if (!chosen) throw new ProviderError(`The Nexsahay session "${TARGET_SESSION_NAME}" was not found on the gateway.`, { retryable: false });
+  if (!isConnected(chosen)) {
+    throw new ProviderError(`WhatsApp session "${shortSessionName(chosen.name)}" is ${chosen.status}, not CONNECTED. ${String(chosen.status).toUpperCase() === 'QR_READY' ? 'Open WhatsApp Setup and scan its QR code with WhatsApp on your phone (Linked devices).' : 'Reconnect this session in the Nexsahay console.'}`, { retryable: false });
   }
-  const connected = sessions.find(isConnected);
-  if (connected) return connected;
-  const summary = sessions.length ? sessions.map((s) => `"${s.name}" is ${s.status}`).join(', ') : 'no sessions exist';
-  throw new ProviderError(`No CONNECTED WhatsApp session on the gateway (${summary}). Scan a session's QR code on the WhatsApp page to connect it.`, { retryable: false });
+  return chosen;
 }
 
 export function formatJid(address, kind = 'individual') {
@@ -158,7 +153,8 @@ export async function capabilities() {
   let connectionError = null;
   try { sessions = await listSessions(); } catch (e) { connectionError = e.message; }
   if (!connectionError) { try { active = await getActiveSession(); } catch (e) { connectionError = e.message; } }
-  const chosenId = await selectedSessionId();
+  const storedSessionId = await selectedSessionId();
+  const chosenId = sessions.find((s) => s.id === storedSessionId)?.id || sessions[0]?.id || null;
   return {
     provider: 'Nexsahay WhatsApp Gateway',
     providerKey: 'nexsahay',
@@ -168,14 +164,14 @@ export async function capabilities() {
     serviceUrl: 'https://wa.sengarinfotech.com/sessions',
     docsUrl: 'https://wa.sengarinfotech.com/api-docs',
     // never send keys to the browser
-    sessions: sessions.map((s) => ({ id: s.id, name: s.name, status: s.status, hasApiKey: Boolean(s.apiKey) })),
-    selectedSessionId: chosenId || null,
-    activeSession: active ? { id: active.id, name: active.name, status: active.status } : null,
+    sessions: sessions.map((s) => ({ id: s.id, name: shortSessionName(s.name), status: s.status, hasApiKey: Boolean(s.apiKey) })),
+    selectedSessionId: chosenId,
+    activeSession: active ? { id: active.id, name: shortSessionName(active.name), status: active.status } : null,
     keySource: active?.apiKey ? 'session' : config.whatsapp.nexsahay?.apiKey ? 'env' : 'none',
     groupsEnabled: true,
     messageMode: 'session',
     templates: { image: null, document: null, language: 'en' },
-    businessNumber: active?.name || null,
+    businessNumber: active ? shortSessionName(active.name) : null,
     webhookConfigured: false,
     limits: {
       imageMaxMb: 16,

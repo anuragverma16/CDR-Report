@@ -25,7 +25,7 @@ export default function Motivation() {
   const [msg, setMsg] = useState<{ kind: 'success' | 'error' | 'info'; text: string } | null>(null);
 
   const load = () => api.get<View>('/motivation')
-    .then((v) => { setView(v); setSlotDraft(v.slots); setForm((f) => ({ ...f, destinationId: f.destinationId || v.groups[0]?._id || '' })); })
+    .then((v) => { setView(v); setSlotDraft(v.slots); const preferred = v.groups.find((g) => /^test controller$/i.test(g.label)); setForm((f) => ({ ...f, destinationId: f.destinationId || preferred?._id || v.groups[0]?._id || '' })); })
     .catch((e) => setMsg({ kind: 'error', text: errMsg(e) }));
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 

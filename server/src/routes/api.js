@@ -8,7 +8,7 @@ import rateLimit from 'express-rate-limit';
 import fs from 'node:fs';
 import { z } from 'zod';
 import { config, whatsappConfigured } from '../config.js';
-import { User, UploadedCDR, GeneratedReport, Destination, DeliveryLog, ColumnMapping, CdrRecord, AutomationUpload, ROLES, audit } from '../models/index.js';
+import { User, UploadedCDR, GeneratedReport, Destination, DeliveryLog, ColumnMapping, CdrRecord, AutomationUpload, Employee, BirthdaySettings, BirthdaySend, EmployeeBirthdaySchedule, ROLES, audit } from '../models/index.js';
 import { requireAuth, requireRole, signSession, COOKIE, cookieOptions, cdrUpload, asyncH } from '../middleware/index.js';
 import { handleUploads, previewFile, processFile, deleteFile, importForReport } from '../services/cdrService.js';
 import { generateReport, retryImage, dashboardSummary } from '../services/reportService.js';
@@ -21,6 +21,7 @@ import { REPORT_FIELDS } from '../services/mapping.js';
 import { parseCdrFile, sniffType } from '../services/parser.js';
 import * as wa from '../whatsapp/index.js';
 import { writeStored } from '../services/storage.js';
+import { birthdayView, getBirthdaySettings, scheduleBirthday, sendBirthday, uploadEmployeePhoto } from '../services/birthdays.js';
 
 const router = express.Router();
 const automationUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: config.maxUploadMb * 1024 * 1024, files: 1 }, fileFilter: (req, file, cb) => {
@@ -58,6 +59,66 @@ router.post('/auth/login', loginLimiter, asyncH(async (req, res) => {
 router.post('/auth/logout', (req, res) => { res.clearCookie(COOKIE, cookieOptions()); res.json({ ok: true }); });
 
 router.use(requireAuth);
+
+// ---------- Employee birthday messages ----------
+const employeePhoto = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024, files: 1 }, fileFilter: (req, file, cb) => file.mimetype?.startsWith('image/') ? cb(null, true) : cb(Object.assign(new Error('Upload a JPG, PNG, WEBP or other image.'), { status: 415 })) });
+const employeeBody = z.object({ name: z.string().trim().min(1).max(120), dob: isoDate, imageUrl: z.string().url().refine((u) => { try { const x = new URL(u); return x.protocol === 'https:' && (x.hostname === 'cloudinary.com' || x.hostname.endsWith('.cloudinary.com')); } catch { return false; } }, 'Upload the photo to Cloudinary first.') });
+
+router.get('/employees', asyncH(async (req, res) => res.json(await birthdayView())));
+router.post('/employees/photo', requireRole('manager'), employeePhoto.single('file'), asyncH(async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Choose an image to upload.' });
+  res.json(await uploadEmployeePhoto(req.file));
+}));
+router.post('/employees', requireRole('manager'), asyncH(async (req, res) => {
+  const body = employeeBody.parse(req.body);
+  const employee = await Employee.create({ ...body, imagePublicId: req.body.imagePublicId, createdBy: req.user.id });
+  await audit(req.user.id, 'employee.create', String(employee._id), { name: employee.name });
+  res.status(201).json({ employee });
+}));
+router.put('/employees/birthday-settings', requireRole('admin'), asyncH(async (req, res) => {
+  const body = z.object({ enabled: z.boolean(), destinationId: objectId.nullable(), time: hhmm.optional(), message: z.string().trim().min(1).max(1000) }).parse(req.body);
+  if (body.enabled && !body.destinationId) return res.status(400).json({ error: 'Choose a verified WhatsApp group to enable birthday messages.' });
+  if (body.destinationId && !await Destination.exists({ _id: body.destinationId, kind: 'group', verified: true })) return res.status(422).json({ error: 'Choose a verified WhatsApp group.' });
+  const settings = await getBirthdaySettings();
+  Object.assign(settings, body, { time: '00:00', updatedBy: req.user.id }); await settings.save();
+  res.json(await birthdayView());
+}));
+router.post('/employees/schedules', requireRole('manager'), asyncH(async (req, res) => {
+  const b = z.object({ employeeId: objectId, destinationId: objectId, date: isoDate, time: hhmm, message: z.string().trim().min(1).max(1000).optional() }).parse(req.body);
+  const [employee, destination] = await Promise.all([Employee.findById(b.employeeId), Destination.findOne({ _id: b.destinationId, kind: 'group', verified: true })]);
+  if (!employee) return res.status(404).json({ error: 'Employee not found.' });
+  if (!destination) return res.status(422).json({ error: 'Choose a verified WhatsApp group.' });
+  const schedule = await scheduleBirthday({ ...b, employee, destination, userId: req.user.id });
+  res.status(201).json({ schedule, ...(await birthdayView()) });
+}));
+router.delete('/employees/schedules/:id', requireRole('manager'), asyncH(async (req, res) => {
+  const schedule = await EmployeeBirthdaySchedule.findOneAndUpdate({ _id: objectId.parse(req.params.id), status: 'pending' }, { status: 'cancelled' }, { new: true });
+  if (!schedule) return res.status(404).json({ error: 'Pending birthday schedule not found.' });
+  res.json(await birthdayView());
+}));
+router.put('/employees/:id', requireRole('manager'), asyncH(async (req, res) => {
+  const employee = await Employee.findById(objectId.parse(req.params.id));
+  if (!employee) return res.status(404).json({ error: 'Employee not found.' });
+  Object.assign(employee, employeeBody.parse(req.body));
+  if (typeof req.body.imagePublicId === 'string') employee.imagePublicId = req.body.imagePublicId;
+  await employee.save();
+  res.json({ employee });
+}));
+router.delete('/employees/:id', requireRole('manager'), asyncH(async (req, res) => {
+  const id = objectId.parse(req.params.id);
+  await Employee.deleteOne({ _id: id });
+  await EmployeeBirthdaySchedule.updateMany({ employeeId: id, status: 'pending' }, { status: 'cancelled' });
+  await audit(req.user.id, 'employee.delete', String(id));
+  res.json({ ok: true });
+}));
+router.post('/employees/:id/send-birthday', requireRole('manager'), asyncH(async (req, res) => {
+  const b = z.object({ destinationId: objectId, message: z.string().trim().min(1).max(1000).optional() }).parse(req.body);
+  const [employee, destination] = await Promise.all([Employee.findById(objectId.parse(req.params.id)), Destination.findOne({ _id: b.destinationId, kind: 'group', verified: true })]);
+  if (!employee) return res.status(404).json({ error: 'Employee not found.' });
+  if (!destination) return res.status(422).json({ error: 'Choose a verified WhatsApp group.' });
+  const result = await sendBirthday(employee, destination, { dateKey: `${new Date().toISOString().slice(0, 10)}-manual-${new mongoose.Types.ObjectId()}`, messageTemplate: b.message });
+  res.json({ result });
+}));
 
 // ---------- Report automation: allowlisted CDR query + isolated workbook uploads ----------
 const automationFilterSchema = z.object({ from: isoDate.optional(), to: isoDate.optional(), agent: z.string().max(120).optional(), status: z.string().max(80).optional(), page: z.coerce.number().int().min(1).default(1) });
@@ -325,7 +386,9 @@ router.get('/whatsapp/sessions', asyncH(async (req, res) => {
 
 router.get('/whatsapp/sessions/:id', requireRole('admin'), asyncH(async (req, res) => {
   try {
-    const s = await wa.getSession(sessionId.parse(req.params.id));
+    const id = sessionId.parse(req.params.id);
+    if (!(await wa.listSessions()).some((session) => session.id === id)) return res.status(404).json({ error: 'Only the configured Nexsahay Controller session is available.' });
+    const s = await wa.getSession(id);
     if (!s) return res.status(404).json({ error: 'Session not found on the gateway' });
     const qr = typeof s.qr === 'string' && s.qr.startsWith('data:image/') ? s.qr : null;
     res.json({ session: { id: s.id, name: s.name, status: s.status, qr } });

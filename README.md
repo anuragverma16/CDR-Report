@@ -189,3 +189,17 @@ Report images need Chromium. The build runs `npm run install-browser`. If the bu
 - After changing `VITE_API_URL`, redeploy the website. The value is built into the site.
 
 Local development is unchanged: leave `VITE_API_URL` empty and run the API and the client as before. Environment settings live in `server/.env` and `client/.env`.
+# Employee birthday messages
+
+The Employees page stores employee names and dates of birth in MongoDB and uploads their profile photos to Cloudinary. Configure these server environment variables to enable photo uploads:
+
+```env
+CLOUDINARY_CLOUD_NAME=your-cloud-name
+CLOUDINARY_API_KEY=your-api-key
+CLOUDINARY_API_SECRET=your-api-secret
+```
+
+An admin can select a verified WhatsApp group and greeting in `APP_TIMEZONE` (defaults to `Asia/Kolkata`) and enable the birthday automation. The server sends each employee's Cloudinary photo with the greeting as its WhatsApp image caption at 12:00 AM on their birthday. A unique employee/date/group record prevents a duplicate send for that birthday. Managers can create and remove profiles or send an individual birthday image immediately. WhatsApp image sends use the existing configured gateway and its linked account must be connected and a member of the chosen group.
+
+Managers can also schedule a one-time birthday image for a chosen employee, group, date, and time. The server persists these schedules in MongoDB, processes them in the configured timezone, and allows pending sends to be cancelled.
+

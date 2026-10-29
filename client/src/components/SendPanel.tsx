@@ -43,8 +43,8 @@ export function SendPanel({ report, onSent }: { report: Report; onSent?: () => v
       .then(([c, d]) => {
         const verifiedIds = d.destinations.filter((x) => x.verified).map((x) => x._id);
         const savedIds = (readPrefs().destinationIds || []).filter((id) => verifiedIds.includes(id));
-        const testIds = d.destinations.filter((x) => x.verified && /test\s*controller/i.test(x.label)).map((x) => x._id);
-        setCaps(c.capabilities); setDests(d.destinations); setChosen(new Set(savedIds.length ? savedIds : testIds.length ? testIds : verifiedIds)); setReady(true);
+        const testIds = d.destinations.filter((x) => x.verified && x.kind === 'group' && /^test\s*controller$/i.test(x.label)).map((x) => x._id);
+        setCaps(c.capabilities); setDests(d.destinations); setChosen(new Set(testIds.length ? testIds : savedIds)); setReady(true);
       })
       .catch((e) => setError(errMsg(e)));
   }, []);

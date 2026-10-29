@@ -40,6 +40,7 @@ export const config = {
   cookieSameSite: (process.env.COOKIE_SAMESITE || 'lax').toLowerCase(),
   storageDir: path.resolve(process.env.STORAGE_DIR || path.join(__dirname, '..', 'storage')),
   maxUploadMb: Number(process.env.MAX_UPLOAD_MB || 25),
+  cloudinary: { cloudName: process.env.CLOUDINARY_CLOUD_NAME || '', apiKey: process.env.CLOUDINARY_API_KEY || '', apiSecret: process.env.CLOUDINARY_API_SECRET || '' },
   maxFilesPerUpload: Number(process.env.MAX_FILES_PER_UPLOAD || 10),
   timezone: process.env.APP_TIMEZONE || 'Asia/Kolkata',
   chromiumPath: process.env.CHROMIUM_EXECUTABLE_PATH || undefined,

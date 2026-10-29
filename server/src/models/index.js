@@ -215,6 +215,49 @@ export const User = model('User', UserSchema);
 export const Setting = model('Setting', SettingSchema);
 export const MotivationLog = model('MotivationLog', MotivationLogSchema);
 
+const EmployeeSchema = new Schema({
+  name: { type: String, required: true, trim: true, maxlength: 120 },
+  dob: { type: String, required: true, match: /^\d{4}-\d{2}-\d{2}$/ },
+  imageUrl: { type: String, required: true },
+  imagePublicId: String,
+  createdBy: { type: Types.ObjectId, ref: 'User' },
+}, { timestamps: true });
+EmployeeSchema.index({ name: 1 });
+
+const BirthdaySettingsSchema = new Schema({
+  key: { type: String, default: 'default', unique: true },
+  enabled: { type: Boolean, default: false },
+  destinationId: { type: Types.ObjectId, ref: 'Destination' },
+  time: { type: String, default: '00:00' },
+  message: { type: String, default: `🎂 *Happy Birthday, {name}!*\n\nWishing you a wonderful day filled with happiness, laughter, and the people you love. Your dedication, positivity, and contribution mean so much to our team, and we’re grateful to have you with us.\n\nMay the year ahead bring you good health, new opportunities, success, and many moments to celebrate. Enjoy your special day—you deserve it! 🎉🥳` },
+  updatedBy: { type: Types.ObjectId, ref: 'User' },
+}, { timestamps: true });
+
+const BirthdaySendSchema = new Schema({
+  employeeId: { type: Types.ObjectId, ref: 'Employee', required: true },
+  employeeName: String, dateKey: { type: String, required: true },
+  destinationId: { type: Types.ObjectId, ref: 'Destination' }, destinationLabel: String,
+  status: { type: String, enum: ['sending', 'accepted', 'partial', 'failed'], default: 'sending' },
+  message: String, providerMessageId: String, imageMessageId: String, textMessageId: String, error: String, sentAt: Date,
+}, { timestamps: true });
+BirthdaySendSchema.index({ employeeId: 1, dateKey: 1, destinationId: 1 }, { unique: true });
+
+export const Employee = model('Employee', EmployeeSchema);
+export const BirthdaySettings = model('BirthdaySettings', BirthdaySettingsSchema);
+export const BirthdaySend = model('BirthdaySend', BirthdaySendSchema);
+
+const EmployeeBirthdayScheduleSchema = new Schema({
+  employeeId: { type: Types.ObjectId, ref: 'Employee', required: true },
+  destinationId: { type: Types.ObjectId, ref: 'Destination', required: true },
+  employeeName: String, destinationLabel: String, message: String,
+  sendAt: { type: Date, required: true, index: true },
+  status: { type: String, enum: ['pending', 'sending', 'accepted', 'partial', 'failed', 'cancelled'], default: 'pending', index: true },
+  error: String, sentAt: Date, birthdaySendId: { type: Types.ObjectId, ref: 'BirthdaySend' },
+  requestedBy: { type: Types.ObjectId, ref: 'User' },
+}, { timestamps: true });
+EmployeeBirthdayScheduleSchema.index({ status: 1, sendAt: 1 });
+export const EmployeeBirthdaySchedule = model('EmployeeBirthdaySchedule', EmployeeBirthdayScheduleSchema);
+
 /** One custom team message, sent to a verified WhatsApp group at a chosen date and time (Asia/Kolkata). */
 const ScheduledMessageSchema = new Schema({
   text: { type: String, required: true, maxlength: 1000 },

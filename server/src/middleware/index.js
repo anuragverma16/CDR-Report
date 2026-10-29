@@ -84,6 +84,8 @@ export function errorHandler(err, req, res, next) {
     const msg = err.code === 'LIMIT_FILE_SIZE' ? `File too large (max ${config.maxUploadMb} MB)` : err.code === 'LIMIT_FILE_COUNT' ? `Too many files (max ${config.maxFilesPerUpload})` : err.message;
     return res.status(413).json({ error: msg });
   }
+  if (err.name === 'ValidationError') return res.status(400).json({ error: err.message });
+  if (err.code === 11000) return res.status(409).json({ error: 'This employee or birthday entry already exists.' });
   if (err.name === 'CastError') return res.status(404).json({ error: 'Not found' });
   const status = err.status || 500;
   const intended = Boolean(err.status); // errors raised deliberately with a status carry a user-facing message

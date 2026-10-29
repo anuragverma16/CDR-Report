@@ -23,7 +23,10 @@ export default function ScheduleSettings() {
     Promise.all([api.get<View>('/settings/schedule'), api.get<{ destinations: Destination[] }>('/whatsapp/destinations'), api.get<NonNullable<typeof source>>('/live/status')])
       .then(([v, d, src]) => {
         const validIds = new Set(d.destinations.filter((destination) => destination.verified).map((destination) => destination._id));
-        const schedule = { ...v.schedule, destinationIds: [...new Set(v.schedule.destinationIds || [])].filter((id) => validIds.has(id)) };
+        const preferredGroup = d.destinations.find((destination) => destination.verified && destination.kind === 'group' && /^test controller$/i.test(destination.label));
+        const destinationIds = [...new Set(v.schedule.destinationIds || [])].filter((id) => validIds.has(id));
+        if (!destinationIds.length && preferredGroup) destinationIds.push(preferredGroup._id);
+        const schedule = { ...v.schedule, destinationIds };
         setView({ ...v, schedule }); setS(schedule); setDests(d.destinations); setSource(src);
       })
       .catch((e) => setMsg({ kind: 'error', text: errMsg(e) }));

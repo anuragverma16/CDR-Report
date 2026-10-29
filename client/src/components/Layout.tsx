@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
-import { CalendarClock, FileSpreadsheet, LogOut, Menu, MessageCircle, Radio, ScrollText, Sparkles, X } from 'lucide-react';
+import { Cake, CalendarClock, FileSpreadsheet, LogOut, Menu, MessageCircle, Radio, ScrollText, Sparkles, X } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 
 const NAV = [
@@ -8,6 +8,7 @@ const NAV = [
   { to: '/schedule', label: 'Auto Send', icon: CalendarClock, hint: 'Daily automatic report' },
   { to: '/whatsapp', label: 'WhatsApp Setup', icon: MessageCircle, hint: 'Connect & choose groups' },
   { to: '/motivation', label: 'Team Messages', icon: Sparkles, hint: 'Schedule a custom message' },
+  { to: '/employees', label: 'Employees', icon: Cake, hint: 'Profiles & birthday messages' },
   { to: '/logs', label: 'Delivery Logs', icon: ScrollText, hint: 'What was sent' },
 ];
 

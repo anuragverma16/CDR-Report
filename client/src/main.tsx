@@ -12,6 +12,7 @@ import ScheduleSettings from './pages/Schedule';
 import Motivation from './pages/Motivation';
 import DeliveryLogs from './pages/DeliveryLogs';
 import LiveReport from './pages/LiveReport';
+import Employees from './pages/Employees';
 
 function Gate() {
   const { user, loading } = useAuth();
@@ -26,6 +27,7 @@ function Gate() {
         <Route path="whatsapp" element={<WhatsApp />} />
         <Route path="schedule" element={<ScheduleSettings />} />
         <Route path="motivation" element={<Motivation />} />
+        <Route path="employees" element={<Employees />} />
         <Route path="logs" element={<DeliveryLogs />} />
         <Route path="*" element={<Navigate to="/live" replace />} />
       </Route>
