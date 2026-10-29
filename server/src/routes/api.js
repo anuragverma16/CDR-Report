@@ -8,7 +8,7 @@ import rateLimit from 'express-rate-limit';
 import fs from 'node:fs';
 import { z } from 'zod';
 import { config, whatsappConfigured } from '../config.js';
-import { User, UploadedCDR, GeneratedReport, Destination, DeliveryLog, ColumnMapping, CdrRecord, AutomationUpload, Employee, BirthdaySettings, BirthdaySend, EmployeeBirthdaySchedule, ROLES, audit } from '../models/index.js';
+import { User, UploadedCDR, GeneratedReport, Destination, DeliveryLog, ColumnMapping, CdrRecord, AutomationUpload, Employee, BirthdaySettings, BirthdaySend, EmployeeBirthdaySchedule, OneTimeReportSchedule, ROLES, audit } from '../models/index.js';
 import { requireAuth, requireRole, signSession, COOKIE, cookieOptions, cdrUpload, asyncH } from '../middleware/index.js';
 import { handleUploads, previewFile, processFile, deleteFile, importForReport } from '../services/cdrService.js';
 import { generateReport, retryImage, dashboardSummary } from '../services/reportService.js';
@@ -22,6 +22,10 @@ import { parseCdrFile, sniffType } from '../services/parser.js';
 import * as wa from '../whatsapp/index.js';
 import { writeStored } from '../services/storage.js';
 import { birthdayView, getBirthdaySettings, scheduleBirthday, sendBirthday, uploadEmployeePhoto } from '../services/birthdays.js';
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc.js';
+import timezone from 'dayjs/plugin/timezone.js';
+dayjs.extend(utc); dayjs.extend(timezone);
 
 const router = express.Router();
 const automationUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: config.maxUploadMb * 1024 * 1024, files: 1 }, fileFilter: (req, file, cb) => {
@@ -525,9 +529,29 @@ router.delete('/whatsapp/destinations/:id', requireRole('admin'), asyncH(async (
 // ---------- Schedule ----------
 async function scheduleView() {
   const s = (await getSchedule()).toObject();
-  return { schedule: s, crons: cronsFor(s), nextRunAt: nextRun(s), whatsappConfigured: whatsappConfigured() };
+  const oneTimeSchedules = await OneTimeReportSchedule.find().sort({ sendAt: -1 }).limit(30).lean();
+  return { schedule: s, crons: cronsFor(s), nextRunAt: nextRun(s), whatsappConfigured: whatsappConfigured(), oneTimeSchedules };
 }
 router.get('/settings/schedule', asyncH(async (req, res) => res.json(await scheduleView())));
+
+router.post('/settings/schedule/once', requireRole('admin'), asyncH(async (req, res) => {
+  const b = z.object({ sendAt: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/), reportDate: isoDate, destinationIds: z.array(objectId).min(1).max(50) }).parse(req.body);
+  const sendAt = dayjs.tz(b.sendAt, (await getSchedule()).timezone).toDate();
+  if (!Number.isFinite(sendAt.getTime()) || sendAt <= new Date()) return res.status(400).json({ error: 'Choose a future send date and time.' });
+  const ids = [...new Set(b.destinationIds)];
+  const groups = await Destination.find({ _id: { $in: ids }, kind: 'group', verified: true }).select('_id').lean();
+  if (groups.length !== ids.length) return res.status(422).json({ error: 'Select only verified WhatsApp groups.' });
+  const entry = await OneTimeReportSchedule.create({ sendAt, reportDate: b.reportDate, destinationIds: ids, requestedBy: req.user.id });
+  await audit(req.user.id, 'schedule.once.create', String(entry._id), { sendAt, reportDate: b.reportDate, destinationIds: ids });
+  res.status(201).json(await scheduleView());
+}));
+
+router.delete('/settings/schedule/once/:id', requireRole('admin'), asyncH(async (req, res) => {
+  const entry = await OneTimeReportSchedule.findOneAndUpdate({ _id: objectId.parse(req.params.id), status: 'pending' }, { status: 'cancelled' }, { new: true });
+  if (!entry) return res.status(404).json({ error: 'Pending one-time report schedule not found.' });
+  await audit(req.user.id, 'schedule.once.cancel', String(entry._id));
+  res.json(await scheduleView());
+}));
 
 router.put('/settings/schedule', requireRole('admin'), asyncH(async (req, res) => {
   const b = z.object({

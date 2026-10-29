@@ -176,6 +176,16 @@ const ScheduleRunSchema = new Schema({
   reportId: { type: Types.ObjectId, ref: 'GeneratedReport' },
 });
 
+const OneTimeReportScheduleSchema = new Schema({
+  sendAt: { type: Date, required: true, index: true },
+  reportDate: { type: String, required: true },
+  destinationIds: [{ type: Types.ObjectId, ref: 'Destination' }],
+  status: { type: String, enum: ['pending', 'sending', 'success', 'partial', 'failed', 'cancelled'], default: 'pending', index: true },
+  message: String,
+  reportId: { type: Types.ObjectId, ref: 'GeneratedReport' },
+  requestedBy: { type: Types.ObjectId, ref: 'User' },
+}, { timestamps: true });
+
 const AutomationUploadSchema = new Schema({
   originalName: { type: String, required: true }, storedName: { type: String, required: true },
   fileType: { type: String, enum: ['xlsx', 'xls', 'csv'], default: 'xlsx' },
@@ -285,6 +295,7 @@ export const DeliveryLog = model('DeliveryLog', DeliveryLogSchema);
 export const ColumnMapping = model('ColumnMapping', ColumnMappingSchema);
 export const AuditLog = model('AuditLog', AuditLogSchema);
 export const ScheduleRun = model('ScheduleRun', ScheduleRunSchema);
+export const OneTimeReportSchedule = model('OneTimeReportSchedule', OneTimeReportScheduleSchema);
 export const AutomationUpload = model('AutomationUpload', AutomationUploadSchema);
 
 export async function audit(userId, action, target, detail) {

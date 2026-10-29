@@ -8,7 +8,8 @@ import { fmtDateTime } from '../lib/format';
 import { Alert, Badge, PageHeader, Section, Spinner, StatusBadge } from '../components/ui';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-interface View { schedule: Schedule; crons: string[]; nextRunAt: string | null; whatsappConfigured: boolean }
+interface OneTime { _id: string; sendAt: string; reportDate: string; destinationIds?: string[]; status: string; message?: string; reportId?: string }
+interface View { schedule: Schedule; crons: string[]; nextRunAt: string | null; whatsappConfigured: boolean; oneTimeSchedules: OneTime[] }
 
 export default function ScheduleSettings() {
   const { can } = useAuth();
@@ -17,6 +18,9 @@ export default function ScheduleSettings() {
   const [dests, setDests] = useState<Destination[]>([]);
   const [source, setSource] = useState<{ configured: boolean; connected: boolean; database: string | null; message?: string } | null>(null);
   const [busy, setBusy] = useState('');
+  const [onceAt, setOnceAt] = useState('');
+  const [onceReportDate, setOnceReportDate] = useState('');
+  const [onceDestinationIds, setOnceDestinationIds] = useState<string[]>([]);
   const [msg, setMsg] = useState<{ kind: 'success' | 'error' | 'info' | 'warning'; text: string } | null>(null);
 
   useEffect(() => {
@@ -61,7 +65,20 @@ export default function ScheduleSettings() {
       setMsg({ kind: r.result.status === 'success' ? 'success' : r.result.status === 'generated' ? 'info' : r.result.status === 'partial' ? 'warning' : 'error', text: r.result.message });
     } catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); } finally { setBusy(''); }
   };
+  const scheduleOnce = async () => {
+    setBusy('once'); setMsg(null);
+    try {
+      const v = await api.post<View>('/settings/schedule/once', { sendAt: onceAt, reportDate: onceReportDate, destinationIds: onceDestinationIds });
+      setView(v); setMsg({ kind: 'success', text: 'One-time report send scheduled.' });
+      setOnceAt(''); setOnceReportDate(''); setOnceDestinationIds([]);
+    } catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); } finally { setBusy(''); }
+  };
+  const cancelOnce = async (id: string) => {
+    try { setView(await api.del<View>(`/settings/schedule/once/${id}`)); }
+    catch (e) { setMsg({ kind: 'error', text: errMsg(e) }); }
+  };
   const verified = dests.filter((d) => d.verified);
+  const verifiedGroups = verified.filter((d) => d.kind === 'group');
 
   return (
     <>
@@ -132,6 +149,21 @@ export default function ScheduleSettings() {
           )}
         </Section>
       </fieldset>
+
+      <Section title="One-time report send">
+        <p className="mb-4 text-sm text-slate-500">Choose when to send, the report date, and which WhatsApp groups should receive this report. Attachments use the saved settings. Timezone: {s.timezone}.</p>
+        {can('admin') && <div className="mb-4 space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div><label className="label">Send date and time</label><input type="datetime-local" className="input" value={onceAt} onChange={(e) => setOnceAt(e.target.value)} /></div>
+            <div><label className="label">Report date</label><input type="date" className="input" value={onceReportDate} onChange={(e) => setOnceReportDate(e.target.value)} /></div>
+          </div>
+          <div><label className="label">Select WhatsApp groups</label>
+            {verifiedGroups.length ? <div className="flex flex-wrap gap-2">{verifiedGroups.map((d) => <label key={d._id} className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm ${onceDestinationIds.includes(d._id) ? 'border-emerald-500 bg-emerald-500/10' : 'border-slate-200'}`}><input type="checkbox" checked={onceDestinationIds.includes(d._id)} onChange={() => setOnceDestinationIds((ids) => ids.includes(d._id) ? ids.filter((id) => id !== d._id) : [...ids, d._id])} />{d.label}</label>)}</div> : <Alert kind="info">No verified WhatsApp groups are available. Add and verify a group in WhatsApp Setup first.</Alert>}
+          </div>
+          <button className="btn-primary" disabled={!onceAt || !onceReportDate || !onceDestinationIds.length || !!busy} onClick={scheduleOnce}>{busy === 'once' ? 'Scheduling…' : `Schedule one-time send${onceDestinationIds.length ? ` to ${onceDestinationIds.length} group(s)` : ''}`}</button>
+        </div>}
+        {view.oneTimeSchedules.length > 0 && <div className="overflow-x-auto"><table className="w-full"><thead><tr><th className="th">Send at ({s.timezone})</th><th className="th">Report date</th><th className="th">Groups</th><th className="th">Status</th><th className="th">Result</th><th className="th" /></tr></thead><tbody>{view.oneTimeSchedules.map((x) => <tr key={x._id} className="border-b border-slate-100"><td className="td">{fmtDateTime(x.sendAt)}</td><td className="td">{x.reportDate}</td><td className="td">{(x.destinationIds || []).map((id) => dests.find((d) => d._id === id)?.label || 'Group').join(', ')}</td><td className="td"><StatusBadge status={x.status} /></td><td className="td text-xs">{x.reportId ? <Link className="underline" to={`/reports/${x.reportId}`}>Open report</Link> : x.message}</td><td className="td text-right">{x.status === 'pending' && can('admin') && <button className="btn-danger px-2 py-1 text-xs" onClick={() => void cancelOnce(x._id)}>Cancel</button>}</td></tr>)}</tbody></table></div>}
+      </Section>
 
       {can('admin') ? (
         <div className="mt-6 flex flex-wrap gap-3">

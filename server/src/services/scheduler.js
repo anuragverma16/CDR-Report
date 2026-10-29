@@ -2,7 +2,7 @@ import cron from 'node-cron';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc.js';
 import timezone from 'dayjs/plugin/timezone.js';
-import { ReportSchedule, ScheduleRun, UploadedCDR, GeneratedReport, Destination, audit } from '../models/index.js';
+import { ReportSchedule, ScheduleRun, OneTimeReportSchedule, UploadedCDR, GeneratedReport, Destination, audit } from '../models/index.js';
 import { config, mysqlConfigured } from '../config.js';
 import { fetchLiveReport } from './mysqlSource.js';
 import { generateReport } from './reportService.js';
@@ -78,10 +78,10 @@ async function filesFor(s, date) {
  * One scheduled execution. `runKey` makes it idempotent: a unique index on ScheduleRun guarantees
  * the same slot never runs twice (restart, several instances, or a manual test with the same key).
  */
-export async function executeSchedule({ test = false, slot = null } = {}) {
+export async function executeSchedule({ test = false, slot = null, reportDate: requestedDate = null, destinationIds: requestedDestinations = null } = {}) {
   const s = await getSchedule();
   const now = new Date();
-  const date = reportDateFor(s, now);
+  const date = requestedDate || reportDateFor(s, now);
   const runTime = slot || scheduleTimes(s)[0];
   // one run per time slot per day: a restart or a second instance cannot send the same slot twice
   const runKey = test ? `test:${now.toISOString()}` : `${dayjs(now).tz(s.timezone).format('YYYY-MM-DD')}T${runTime}`;
@@ -114,9 +114,10 @@ export async function executeSchedule({ test = false, slot = null } = {}) {
       sourceNote = `${chosen.length} file(s)`;
     }
     if (!report.data.quality.reconciliation.slice(0, 4).every((c) => c.ok)) return finish('failed', 'Report totals did not reconcile; nothing was sent.', report._id);
-    if (!s.destinationIds?.length) return finish('generated', `Report generated (${report.totalCalls} calls) — no destination configured, nothing sent.`, report._id);
+    const destinationIds = requestedDestinations || s.destinationIds;
+    if (!destinationIds?.length) return finish('generated', `Report generated (${report.totalCalls} calls) — no destination configured, nothing sent.`, report._id);
     const attachments = s.attachments !== 'excel' && report.imageStatus !== 'ready' ? 'excel' : s.attachments;
-    const results = await sendReport(report._id, { destinationIds: s.destinationIds, attachments, trigger: test ? 'test' : 'schedule' });
+    const results = await sendReport(report._id, { destinationIds, attachments, trigger: test ? 'test' : 'schedule' });
     const ok = results.filter((r) => r.status === 'accepted' || r.status === 'delivered').length;
     const note = attachments !== s.attachments ? ' (image unavailable — sent Excel only)' : '';
     return finish(ok === results.length ? 'success' : ok ? 'partial' : 'failed', `Report ${date}: ${report.totalCalls} calls from ${sourceNote}. Accepted by WhatsApp for ${ok}/${results.length} destination(s)${note}. ${results.filter((r) => r.error).map((r) => `${r.destination}: ${r.error}`).join(' ')}`.trim(), report._id);
@@ -125,11 +126,28 @@ export async function executeSchedule({ test = false, slot = null } = {}) {
   }
 }
 
+/** Claim due one-time report sends atomically so multiple server instances cannot send duplicates. */
+async function processOneTimeReports(now = new Date()) {
+  const due = await OneTimeReportSchedule.find({ status: 'pending', sendAt: { $lte: now } }).select('_id reportDate destinationIds').limit(20).lean();
+  for (const item of due) {
+    const claimed = await OneTimeReportSchedule.findOneAndUpdate({ _id: item._id, status: 'pending' }, { status: 'sending' }, { new: true });
+    if (!claimed) continue;
+    try {
+      const result = await executeSchedule({ slot: `once:${item._id}`, reportDate: item.reportDate, destinationIds: item.destinationIds?.length ? item.destinationIds.map(String) : null });
+      const status = ['success', 'partial'].includes(result.status) ? result.status : 'failed';
+      await OneTimeReportSchedule.updateOne({ _id: item._id, status: 'sending' }, { status, message: result.message, reportId: result.reportId });
+    } catch (e) {
+      await OneTimeReportSchedule.updateOne({ _id: item._id, status: 'sending' }, { status: 'failed', message: e.message });
+    }
+  }
+}
+
 export async function startScheduler() {
   await reloadSchedule();
   if (!retryTask) retryTask = cron.schedule('* * * * *', () => processDueRetries().catch((e) => console.error('[retry]', e)), { name: 'delivery-retries' });
   if (!motivationTask) motivationTask = cron.schedule('* * * * *', () => motivationTick().catch((e) => console.error('[motivation]', e)), { timezone: config.timezone, name: 'team-motivation' });
   if (!birthdayTask) birthdayTask = cron.schedule('* * * * *', () => birthdayTick().catch((e) => console.error('[birthdays]', e)), { timezone: config.timezone, name: 'employee-birthdays' });
+  cron.schedule('* * * * *', () => processOneTimeReports().catch((e) => console.error('[one-time-report]', e)), { timezone: config.timezone, name: 'one-time-reports' });
 }
 
 /** (Re)register the cron job from the schedule stored in MongoDB. Called at boot and after every change. */
