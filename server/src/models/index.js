@@ -227,6 +227,7 @@ export const MotivationLog = model('MotivationLog', MotivationLogSchema);
 
 const EmployeeSchema = new Schema({
   name: { type: String, required: true, trim: true, maxlength: 120 },
+  team: { type: String, trim: true, maxlength: 80, default: 'Unassigned' },
   dob: { type: String, required: true, match: /^\d{4}-\d{2}-\d{2}$/ },
   imageUrl: { type: String, required: true },
   imagePublicId: String,
@@ -267,6 +268,26 @@ const EmployeeBirthdayScheduleSchema = new Schema({
 }, { timestamps: true });
 EmployeeBirthdayScheduleSchema.index({ status: 1, sendAt: 1 });
 export const EmployeeBirthdaySchedule = model('EmployeeBirthdaySchedule', EmployeeBirthdayScheduleSchema);
+
+const PaymentEntrySchema = new Schema({
+  employeeId: { type: Types.ObjectId, ref: 'Employee', required: true },
+  employeeName: { type: String, required: true }, team: { type: String, default: 'Unassigned' },
+  date: { type: String, required: true, match: /^\d{4}-\d{2}-\d{2}$/ },
+  period: { type: String, enum: ['before_lunch', 'after_lunch'], required: true },
+  amount: { type: Number, min: 0, required: true }, enteredBy: { type: Types.ObjectId, ref: 'User' },
+}, { timestamps: true });
+PaymentEntrySchema.index({ employeeId: 1, date: 1, period: 1 }, { unique: true });
+export const PaymentEntry = model('PaymentEntry', PaymentEntrySchema);
+
+const PaymentReportSettingsSchema = new Schema({
+  key: { type: String, default: 'default', unique: true }, enabled: { type: Boolean, default: false },
+  destinationId: { type: Types.ObjectId, ref: 'Destination' }, time: { type: String, default: '19:00' }, timezone: { type: String, default: 'Asia/Kolkata' },
+  lastSentDate: String, lastStatus: String, lastMessage: String, updatedBy: { type: Types.ObjectId, ref: 'User' },
+}, { timestamps: true });
+export const PaymentReportSettings = model('PaymentReportSettings', PaymentReportSettingsSchema);
+const PaymentReportRunSchema = new Schema({ date: { type: String, required: true }, destinationId: Types.ObjectId, status: String, message: String, providerMessageId: String }, { timestamps: true });
+PaymentReportRunSchema.index({ date: 1 }, { unique: true });
+export const PaymentReportRun = model('PaymentReportRun', PaymentReportRunSchema);
 
 /** One custom team message, sent to a verified WhatsApp group at a chosen date and time (Asia/Kolkata). */
 const ScheduledMessageSchema = new Schema({

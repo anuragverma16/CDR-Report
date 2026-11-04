@@ -8,7 +8,7 @@ import rateLimit from 'express-rate-limit';
 import fs from 'node:fs';
 import { z } from 'zod';
 import { config, whatsappConfigured } from '../config.js';
-import { User, UploadedCDR, GeneratedReport, Destination, DeliveryLog, ColumnMapping, CdrRecord, AutomationUpload, Employee, BirthdaySettings, BirthdaySend, EmployeeBirthdaySchedule, OneTimeReportSchedule, ROLES, audit } from '../models/index.js';
+import { User, UploadedCDR, GeneratedReport, Destination, DeliveryLog, ColumnMapping, CdrRecord, AutomationUpload, Employee, BirthdaySettings, BirthdaySend, EmployeeBirthdaySchedule, PaymentEntry, PaymentReportSettings, OneTimeReportSchedule, ROLES, audit } from '../models/index.js';
 import { requireAuth, requireRole, signSession, COOKIE, cookieOptions, cdrUpload, asyncH } from '../middleware/index.js';
 import { handleUploads, previewFile, processFile, deleteFile, importForReport } from '../services/cdrService.js';
 import { generateReport, retryImage, dashboardSummary } from '../services/reportService.js';
@@ -22,6 +22,7 @@ import { parseCdrFile, sniffType } from '../services/parser.js';
 import * as wa from '../whatsapp/index.js';
 import { writeStored } from '../services/storage.js';
 import { birthdayView, getBirthdaySettings, scheduleBirthday, sendBirthday, uploadEmployeePhoto } from '../services/birthdays.js';
+import { paymentReportView, sendPaymentReport } from '../services/payments.js';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc.js';
 import timezone from 'dayjs/plugin/timezone.js';
@@ -66,7 +67,7 @@ router.use(requireAuth);
 
 // ---------- Employee birthday messages ----------
 const employeePhoto = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024, files: 1 }, fileFilter: (req, file, cb) => file.mimetype?.startsWith('image/') ? cb(null, true) : cb(Object.assign(new Error('Upload a JPG, PNG, WEBP or other image.'), { status: 415 })) });
-const employeeBody = z.object({ name: z.string().trim().min(1).max(120), dob: isoDate, imageUrl: z.string().url().refine((u) => { try { const x = new URL(u); return x.protocol === 'https:' && (x.hostname === 'cloudinary.com' || x.hostname.endsWith('.cloudinary.com')); } catch { return false; } }, 'Upload the photo to Cloudinary first.') });
+const employeeBody = z.object({ name: z.string().trim().min(1).max(120), team: z.string().trim().min(1).max(80).optional(), dob: isoDate, imageUrl: z.string().url().refine((u) => { try { const x = new URL(u); return x.protocol === 'https:' && (x.hostname === 'cloudinary.com' || x.hostname.endsWith('.cloudinary.com')); } catch { return false; } }, 'Upload the photo to Cloudinary first.') });
 
 router.get('/employees', asyncH(async (req, res) => res.json(await birthdayView())));
 router.post('/employees/photo', requireRole('manager'), employeePhoto.single('file'), asyncH(async (req, res) => {
@@ -75,7 +76,7 @@ router.post('/employees/photo', requireRole('manager'), employeePhoto.single('fi
 }));
 router.post('/employees', requireRole('manager'), asyncH(async (req, res) => {
   const body = employeeBody.parse(req.body);
-  const employee = await Employee.create({ ...body, imagePublicId: req.body.imagePublicId, createdBy: req.user.id });
+  const employee = await Employee.create({ ...body, team: body.team || 'Unassigned', imagePublicId: req.body.imagePublicId, createdBy: req.user.id });
   await audit(req.user.id, 'employee.create', String(employee._id), { name: employee.name });
   res.status(201).json({ employee });
 }));
@@ -103,7 +104,8 @@ router.delete('/employees/schedules/:id', requireRole('manager'), asyncH(async (
 router.put('/employees/:id', requireRole('manager'), asyncH(async (req, res) => {
   const employee = await Employee.findById(objectId.parse(req.params.id));
   if (!employee) return res.status(404).json({ error: 'Employee not found.' });
-  Object.assign(employee, employeeBody.parse(req.body));
+  const body = employeeBody.parse(req.body);
+  Object.assign(employee, body, { team: body.team ?? employee.team ?? 'Unassigned' });
   if (typeof req.body.imagePublicId === 'string') employee.imagePublicId = req.body.imagePublicId;
   await employee.save();
   res.json({ employee });
@@ -122,6 +124,35 @@ router.post('/employees/:id/send-birthday', requireRole('manager'), asyncH(async
   if (!destination) return res.status(422).json({ error: 'Choose a verified WhatsApp group.' });
   const result = await sendBirthday(employee, destination, { dateKey: `${new Date().toISOString().slice(0, 10)}-manual-${new mongoose.Types.ObjectId()}`, messageTemplate: b.message });
   res.json({ result });
+}));
+
+// ---------- Daily employee payment report ----------
+router.get('/payments/daily', asyncH(async (req, res) => {
+  const date = req.query.date ? isoDate.parse(req.query.date) : undefined;
+  res.json(await paymentReportView(date));
+}));
+router.put('/payments/entry', requireRole('manager'), asyncH(async (req, res) => {
+  const b = z.object({ employeeId: objectId, date: isoDate, period: z.enum(['before_lunch', 'after_lunch']), amount: z.number().finite().min(0).max(100000000) }).parse(req.body);
+  const employee = await Employee.findById(b.employeeId).lean();
+  if (!employee) return res.status(404).json({ error: 'Employee not found.' });
+  const entry = await PaymentEntry.findOneAndUpdate({ employeeId: employee._id, date: b.date, period: b.period }, { $set: { employeeName: employee.name, team: employee.team || 'Unassigned', amount: b.amount, enteredBy: req.user.id } }, { new: true, upsert: true, runValidators: true });
+  await audit(req.user.id, 'payment.entry', `${b.date}:${employee._id}:${b.period}`, { amount: b.amount, team: employee.team });
+  res.json({ entry });
+}));
+router.put('/payments/settings', requireRole('admin'), asyncH(async (req, res) => {
+  const b = z.object({ enabled: z.boolean(), destinationId: objectId.nullable(), time: hhmm }).parse(req.body);
+  if (b.enabled && !b.destinationId) return res.status(400).json({ error: 'Choose a verified WhatsApp group to enable the daily report.' });
+  if (b.destinationId && !await Destination.exists({ _id: b.destinationId, kind: 'group', verified: true })) return res.status(422).json({ error: 'Choose a verified WhatsApp group.' });
+  let s = await PaymentReportSettings.findOne({ key: 'default' });
+  if (!s) s = new PaymentReportSettings({ key: 'default' });
+  Object.assign(s, b, { timezone: config.timezone, updatedBy: req.user.id }); await s.save();
+  await audit(req.user.id, 'payment.settings', 'default', b);
+  res.json(await paymentReportView(req.query.date ? isoDate.parse(req.query.date) : undefined));
+}));
+router.post('/payments/send', requireRole('manager'), asyncH(async (req, res) => {
+  const b = z.object({ date: isoDate, destinationId: objectId }).parse(req.body);
+  const result = await sendPaymentReport(b.date, b.destinationId);
+  res.json({ result, ...(await paymentReportView(b.date)) });
 }));
 
 // ---------- Report automation: allowlisted CDR query + isolated workbook uploads ----------

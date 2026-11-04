@@ -9,6 +9,7 @@ import { generateReport } from './reportService.js';
 import { sendReport, processDueRetries } from './deliveryService.js';
 import { motivationTick } from './motivation.js';
 import { birthdayTick } from './birthdays.js';
+import { paymentReportTick } from './payments.js';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -17,6 +18,7 @@ let mainTasks = [];
 let retryTask = null;
 let motivationTask = null;
 let birthdayTask = null;
+let paymentTask = null;
 
 /** The run times of a schedule ("HH:mm"), earliest first. A schedule can run several times a day. */
 export function scheduleTimes(s) {
@@ -147,6 +149,7 @@ export async function startScheduler() {
   if (!retryTask) retryTask = cron.schedule('* * * * *', () => processDueRetries().catch((e) => console.error('[retry]', e)), { name: 'delivery-retries' });
   if (!motivationTask) motivationTask = cron.schedule('* * * * *', () => motivationTick().catch((e) => console.error('[motivation]', e)), { timezone: config.timezone, name: 'team-motivation' });
   if (!birthdayTask) birthdayTask = cron.schedule('* * * * *', () => birthdayTick().catch((e) => console.error('[birthdays]', e)), { timezone: config.timezone, name: 'employee-birthdays' });
+  if (!paymentTask) paymentTask = cron.schedule('* * * * *', () => paymentReportTick().catch((e) => console.error('[payment-report]', e)), { timezone: config.timezone, name: 'daily-payment-report' });
   cron.schedule('* * * * *', () => processOneTimeReports().catch((e) => console.error('[one-time-report]', e)), { timezone: config.timezone, name: 'one-time-reports' });
 }
 

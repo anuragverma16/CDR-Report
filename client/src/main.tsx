@@ -13,6 +13,7 @@ import Motivation from './pages/Motivation';
 import DeliveryLogs from './pages/DeliveryLogs';
 import LiveReport from './pages/LiveReport';
 import Employees from './pages/Employees';
+import Payments from './pages/Payments';
 
 function Gate() {
   const { user, loading } = useAuth();
@@ -28,6 +29,7 @@ function Gate() {
         <Route path="schedule" element={<ScheduleSettings />} />
         <Route path="motivation" element={<Motivation />} />
         <Route path="employees" element={<Employees />} />
+        <Route path="payments" element={<Payments />} />
         <Route path="logs" element={<DeliveryLogs />} />
         <Route path="*" element={<Navigate to="/live" replace />} />
       </Route>

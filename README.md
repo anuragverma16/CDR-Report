@@ -75,6 +75,10 @@ Set `MYSQL_HOST`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE` (and the tabl
 
 *Auto refresh* re-fetches every 5/15/30 minutes while the page is open. When MySQL is configured, the scheduled run also fetches from MySQL instead of using uploaded files. Use a read-only MySQL user (`GRANT SELECT ON nexsahay_dialer.* ...`).
 
+### Daily payment report
+
+The **Payments** page records per-employee payment amounts for before lunch (09:00–13:00) and after lunch (14:00–19:00), and summarizes them by the employee's team. Assign employees to teams from **Employees**. An admin can select a verified WhatsApp group, set a daily send time in `APP_TIMEZONE`, and enable the scheduled image report. Payment figures are entered by a manager; they are not derived from the dialer CDR or payroll data.
+
 ### Report rules
 
 - Total Calls = unique valid records. Answered/Missed come from your status mapping; statuses you leave unmapped stay in Total but in neither column, and the report flags them.
