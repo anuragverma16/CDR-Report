@@ -34,6 +34,8 @@ const UploadedCDRSchema = new Schema({
   stats: Schema.Types.Mixed, // valid / invalid / duplicates counts at processing time
   source: { type: String, enum: ['upload', 'mysql'], default: 'upload' },
   sourceDate: String, // mysql snapshots: the report date the rows were fetched for
+  fingerprint: String, // mysql snapshots: cheap summary of the day's source rows at fetch time (see mysqlSource.js)
+  fetchMeta: Schema.Types.Mixed, // mysql snapshots: counts and notes returned with the report, so an unchanged fetch needs no re-read
   processedAt: Date,
   processedBy: { type: Types.ObjectId, ref: 'User' },
 }, { timestamps: true });

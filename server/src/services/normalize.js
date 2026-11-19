@@ -46,13 +46,39 @@ export function normalizeAgent(v, aliases = {}) {
   return { key, name: titleCase(key) };
 }
 
+// dayjs.tz() builds a new timezone formatter on every call, which made a 28k-row day take seconds per pass.
+// One cached Intl formatter per zone does the same conversion in a fraction of the time.
+const zoneFormatters = new Map();
+function zoneFormatter(tz) {
+  let f = zoneFormatters.get(tz);
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' });
+    zoneFormatters.set(tz, f);
+  }
+  return f;
+}
+
+/** The wall-clock fields a UTC instant shows in `tz`, as a UTC timestamp (so they can be compared with Date.UTC). */
+function wallClockMs(instantMs, tz) {
+  const p = {};
+  for (const part of zoneFormatter(tz).formatToParts(new Date(instantMs))) p[part.type] = part.value;
+  return Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour), Number(p.minute), Number(p.second));
+}
+
 function wallClockToInstant(y, mo, d, h = 0, mi = 0, s = 0, tz) {
   if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59 || s > 59) return null;
-  const pad = (n) => String(n).padStart(2, '0');
-  const str = `${y}-${pad(mo)}-${pad(d)} ${pad(h)}:${pad(mi)}:${pad(s)}`;
-  const parsed = dayjs.tz(str, tz);
-  if (!parsed.isValid() || parsed.date() !== d || parsed.month() + 1 !== mo) return null;
-  return parsed.toDate();
+  const want = Date.UTC(y, mo - 1, d, h, mi, s);
+  const check = new Date(want);
+  if (check.getUTCFullYear() !== y || check.getUTCMonth() !== mo - 1 || check.getUTCDate() !== d) return null; // e.g. 30 Feb
+  // Offset of the zone at the wall-clock time, applied twice so it is right on both sides of a DST change
+  const first = want - (wallClockMs(want, tz) - want);
+  const instant = want - (wallClockMs(first, tz) - first);
+  if (wallClockMs(instant, tz) !== want) {
+    // A clock time that does not exist (skipped by a DST change): keep the previous behaviour for these rare rows
+    const parsed = dayjs.tz(`${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')} ${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}:${String(s).padStart(2, '0')}`, tz);
+    return parsed.isValid() ? parsed.toDate() : null;
+  }
+  return new Date(instant);
 }
 
 /**
@@ -123,7 +149,8 @@ function fullYear(y) {
 
 /** YYYY-MM-DD of an instant in the given timezone. */
 export function localDate(date, tz = 'Asia/Kolkata') {
-  return dayjs(date).tz(tz).format('YYYY-MM-DD');
+  const ms = wallClockMs(new Date(date).getTime(), tz);
+  return new Date(ms).toISOString().slice(0, 10);
 }
 
 /**

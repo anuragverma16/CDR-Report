@@ -140,21 +140,31 @@ function describeDerivation(mapping, derive) {
   }).filter(([, v]) => v));
 }
 
-export async function mysqlStatus() {
+// The status panel counts whole tables, which is slow on a large dialer database. Successful results are reused for a minute.
+const STATUS_CACHE_MS = 60 * 1000;
+let statusCache = null;
+export async function mysqlStatus({ fresh = false } = {}) {
+  if (!fresh && statusCache && Date.now() - statusCache.at < STATUS_CACHE_MS) return statusCache.value;
+  const value = await computeStatus();
+  statusCache = value.connected ? { at: Date.now(), value } : null;
+  return value;
+}
+
+async function computeStatus() {
   const m = config.mysql;
   const base = { configured: mysqlConfigured(), connected: false, host: m.host ? `${m.host}:${m.port}` : null, database: m.database || null, tables: [], mapping: null, missing: [] };
   if (!base.configured) return { ...base, message: 'Set MYSQL_HOST, MYSQL_USER, MYSQL_PASSWORD and MYSQL_DATABASE in server/.env, then restart the server.' };
   try {
     const { tables, mapping, derive, missing } = await layout();
     const db = getPool();
-    const out = [];
-    for (const t of tables) {
+    const out = await Promise.all(tables.map(async (t) => {
       const id = mysql.escapeId(t.name);
-      const [[{ n }]] = await db.query(`SELECT COUNT(*) AS n FROM ${id}`);
-      let latest = null;
-      if (t.timeExpr) [[{ latest }]] = await db.query(`SELECT MAX(${t.timeExpr}) AS latest FROM ${id}`);
-      out.push({ kind: t.kind, name: t.name, rows: Number(n), latest, dateColumn: t.timeExpr ? derive.timeCols.join(' / ') : null, columns: t.columns.map((c) => c.name) });
-    }
+      const [[counts], latestRows] = await Promise.all([
+        db.query(`SELECT COUNT(*) AS n FROM ${id}`).then(([r]) => r),
+        t.timeExpr ? db.query(`SELECT MAX(${t.timeExpr}) AS latest FROM ${id}`).then(([r]) => r) : [{ latest: null }],
+      ]);
+      return { kind: t.kind, name: t.name, rows: Number(counts.n), latest: latestRows[0]?.latest ?? null, dateColumn: t.timeExpr ? derive.timeCols.join(' / ') : null, columns: t.columns.map((c) => c.name) };
+    }));
     return { ...base, connected: true, tables: out, mapping: describeDerivation(mapping, derive), missing };
   } catch (e) {
     return { ...base, message: e.status ? e.message : `Could not connect to MySQL: ${e.message}` };
@@ -211,13 +221,20 @@ async function loadDbDispositions(callIds) {
   if (!table || !callIds.length) return out;
   const [[exists]] = await getPool().query('SELECT COUNT(*) AS n FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?', [config.mysql.database, table]);
   if (!exists.n) return out;
-  // One round trip per 5000 IDs: each query to the database costs a network round trip, so fewer is faster
-  for (let i = 0; i < callIds.length; i += 5000) {
-    const [rows] = await getPool().query(`SELECT * FROM ${mysql.escapeId(table)} WHERE call_id IN (?) ORDER BY id`, [callIds.slice(i, i + 5000)]);
-    for (const r of rows) { // ordered by id: a later re-disposition of the same call wins
-      const secs = (v) => (blank(v) || !Number.isFinite(Number(v)) ? null : Number(v));
-      out.set(callKey(r.call_id), { name: dispositionName(r), holdSec: secs(r.hold_time), wrapSec: secs(r.wrap_up_time) });
-    }
+  // Only the columns the report uses (raw_payload is large JSON), IDs de-duplicated, and the chunks run side by side.
+  // Each call ID lands in exactly one chunk, so its rows stay in id order within that chunk.
+  const ids = [...new Set(callIds)];
+  // Larger chunks mean fewer lookups; without an index on call_id each lookup scans the whole table
+  const CHUNK = 5000;
+  const chunks = [];
+  for (let i = 0; i < ids.length; i += CHUNK) chunks.push(ids.slice(i, i + CHUNK));
+  const results = await Promise.all(chunks.map((chunk) => getPool()
+    .query({ sql: `SELECT id, call_id, disposition, raw_payload, hold_time, wrap_up_time FROM ${mysql.escapeId(table)} WHERE call_id IN (?) ORDER BY id`, timeout: 60000 }, [chunk])
+    .then(([rows]) => rows)));
+  const rows = results.flat().sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : BigInt(a.id) > BigInt(b.id) ? 1 : 0));
+  const secs = (v) => (blank(v) || !Number.isFinite(Number(v)) ? null : Number(v));
+  for (const r of rows) { // ordered by id: a later re-disposition of the same call wins
+    out.set(callKey(r.call_id), { name: dispositionName(r), holdSec: secs(r.hold_time), wrapSec: secs(r.wrap_up_time) });
   }
   return out;
 }
@@ -383,6 +400,51 @@ async function dropOlderSnapshots(date, keepId) {
   }
 }
 
+/**
+ * Cheap summary of everything a day's report depends on, read with a few aggregate queries instead of pulling rows:
+ * per table the call count and latest call time for the day, the newest disposition id, and the export file in use.
+ * If it matches the stored fingerprint of the last fetch, no call in the day has been added or changed (as far as
+ * count and latest time show) and the stored report is still right. Returns null when that cannot be known.
+ */
+async function dayFingerprint(date, tables) {
+  if (tables.some((t) => !t.timeExpr)) return null; // tables without a date column cannot be summarized per day
+  const next = dayjs(date).add(1, 'day').format('YYYY-MM-DD');
+  const db = getPool();
+  const parts = await Promise.all(tables.map(async (t) => {
+    const [[row]] = await db.query({ sql: `SELECT COUNT(*) AS n, MAX(${t.timeExpr}) AS latest FROM ${mysql.escapeId(t.name)} WHERE ${t.timeExpr} >= ? AND ${t.timeExpr} < ?`, timeout: 30000 }, [date, next]);
+    return { table: t.name, n: Number(row.n), latest: row.latest ?? null };
+  }));
+  let dispositions = null;
+  const table = config.mysql.dispositionsTable;
+  if (table && await tableExists(table)) {
+    const [[d]] = await db.query(`SELECT MAX(id) AS maxId FROM ${mysql.escapeId(table)}`);
+    dispositions = d.maxId == null ? null : String(d.maxId);
+  }
+  const exportFile = await latestExportFile(date);
+  return JSON.stringify({ date, parts, dispositions, exportId: exportFile ? String(exportFile._id) : null });
+}
+
+async function tableExists(table) {
+  const [[r]] = await getPool().query('SELECT COUNT(*) AS n FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?', [config.mysql.database, table]);
+  return Number(r.n) > 0;
+}
+
+/** Same choice as loadExportFor(), without reading the export's records. */
+async function latestExportFile(date) {
+  const file = await UploadedCDR.findOne({ source: { $ne: 'mysql' }, status: 'processed', 'dateRange.from': { $lte: date }, 'dateRange.to': { $gte: date } }).sort({ processedAt: -1 }).select('_id mapping').lean();
+  return file?.mapping?.callId ? file : null;
+}
+
+/** The stored snapshot whose fingerprint equals `fingerprint`, if its report and CSV are still there. */
+async function unchangedSnapshot(date, fingerprint) {
+  const snap = await UploadedCDR.findOne({ source: 'mysql', sourceDate: date, status: 'processed', fingerprint }).sort({ processedAt: -1 });
+  if (!snap?.fetchMeta) return null;
+  const report = await GeneratedReport.findOne({ fileIds: [snap._id], reportDate: date, type: 'single' }).sort({ createdAt: -1 });
+  if (!report) return null;
+  if (!(await fs.access(storagePath('uploads', snap.storedName)).then(() => true, () => false))) return null;
+  return { snap, report };
+}
+
 // Fetches for the same date run one after another (never in parallel), and every request gets a fresh run,
 // so a fetch asked for after an export upload always sees that export.
 const queue = new Map();
@@ -391,13 +453,38 @@ const queue = new Map();
  * Pull the day's rows from MySQL right now and build the standard agent report from them.
  * Answered / Missed comes from each row's call status (the table name only when that is blank).
  */
-export function fetchLiveReport({ date, user = null, trigger = 'manual' }) {
+export function fetchLiveReport({ date, user = null, trigger = 'manual', force = false }) {
   if (!mysqlConfigured()) return Promise.reject(httpError(503, 'MySQL is not configured. Fill in the MYSQL_* settings in server/.env and restart the server.'));
   const previous = queue.get(date) || Promise.resolve();
   const run = previous.catch(() => {}).then(async () => {
     const actor = user || { id: null };
     const fetchedAt = new Date();
     const mark = stageTimer(date);
+
+    // Fetch only what changed: when the day's summary matches the last fetch, return that report without reading rows.
+    // `force` skips this check (use it after editing existing rows in place, which the summary cannot see).
+    let fingerprint = null;
+    try {
+      const { tables, missing } = await layout();
+      if (!missing.length) fingerprint = await dayFingerprint(date, tables);
+    } catch (e) {
+      console.warn(`[fetch ${date}] change check skipped: ${e.message}`);
+    }
+    mark('change check');
+    if (!force && fingerprint) {
+      const hit = await unchangedSnapshot(date, fingerprint);
+      if (hit) {
+        const { snap, report } = hit;
+        const meta = snap.fetchMeta;
+        mark('unchanged: stored report');
+        await audit(actor.id, 'mysql.fetch', String(report._id), { date, ...meta.fetched, reused: true, newReport: false, unchangedCheck: true });
+        return {
+          report: report.toObject(), reportDate: date, fetchedAt, fetched: meta.fetched, export: meta.export, reused: true,
+          stats: snap.stats, unclassifiedStatuses: meta.unclassifiedStatuses || [], dates: meta.dates || [],
+        };
+      }
+    }
+
     let pulled;
     let enrich = null;
     try {
@@ -449,17 +536,25 @@ export function fetchLiveReport({ date, user = null, trigger = 'manual' }) {
     const unchanged = reused && await GeneratedReport.findOne({ fileIds: [file._id], reportDate: date, type: 'single' }).sort({ createdAt: -1 });
     const report = unchanged || await generateReport({ type: 'single', fileIds: [file._id], reportDate: date, restrictToDate: true, userId: actor.id, trigger });
     mark(unchanged ? 'reused report' : 'report, excel and image');
+
+    // Saved with the snapshot so the next fetch can return it without reading the rows again
+    const fetched = { ...counts, filteredInSql, tables };
+    const exportInfo = enrich ? { name: enrich.file.originalName, calls: enrich.byCallId.size, matched: counts.enriched } : null;
+    const unclassifiedStatuses = preview.unclassifiedStatuses || [];
+    const dates = (preview.summary?.dates || []).map((d) => d.value);
+    await UploadedCDR.updateOne({ _id: file._id }, { fingerprint, fetchMeta: { fetched, export: exportInfo, unclassifiedStatuses, dates } });
+
     await audit(actor.id, 'mysql.fetch', String(report._id), { date, ...counts, reused, newReport: !unchanged });
     return {
       report: report.toObject(),
       reportDate: date,
       fetchedAt,
-      fetched: { ...counts, filteredInSql, tables },
-      export: enrich ? { name: enrich.file.originalName, calls: enrich.byCallId.size, matched: counts.enriched } : null,
+      fetched,
+      export: exportInfo,
       reused,
       stats: file.stats,
-      unclassifiedStatuses: preview.unclassifiedStatuses || [],
-      dates: (preview.summary?.dates || []).map((d) => d.value),
+      unclassifiedStatuses,
+      dates,
     };
   });
   queue.set(date, run);

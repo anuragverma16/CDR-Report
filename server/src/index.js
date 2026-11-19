@@ -2,6 +2,7 @@ import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import compression from 'compression';
 import mongoose from 'mongoose';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -35,6 +36,7 @@ export function createApp() {
   }));
   app.use(cors({ origin: config.corsOrigin.split(',').map((s) => s.trim()), credentials: true }));
   app.use('/api/whatsapp/webhook', webhook); // raw body, signature-checked
+  app.use(compression({ threshold: 1024 })); // smaller JSON and page responses over the network
   app.use(express.json({ limit: '1mb' }));
   app.use(cookieParser());
   app.use(originCheck);
@@ -83,7 +85,8 @@ async function main() {
   await connectDatabase();
   await ensurePredefinedAdmin().catch((e) => console.error('[admin]', e.message));
   await startScheduler();
-  warmBrowser();
+  // Chromium is ~300 MB; it is started on the first PNG render instead of at boot unless PREWARM_BROWSER=true
+  if (process.env.PREWARM_BROWSER === 'true') warmBrowser();
   const shutdown = async () => {
     server.close();
     await closeBrowser();

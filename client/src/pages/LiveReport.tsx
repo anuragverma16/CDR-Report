@@ -82,13 +82,14 @@ export default function LiveReport() {
   // A fetch asked for while one is running (e.g. right after an export upload) runs again once it finishes,
   // so the shown report always reflects everything uploaded before the request.
   const pendingRef = useRef(false);
-  const fetchNow = useCallback(async (silent = false) => {
+  // Normal fetches only read what changed. `force` re-reads the whole day (for rows edited in place in MySQL).
+  const fetchNow = useCallback(async (silent = false, force = false) => {
     if (busyRef.current) { pendingRef.current = true; return; }
     busyRef.current = true; setBusy(true); if (!silent) setError('');
     try {
       do {
         pendingRef.current = false;
-        const r = await api.post<FetchResult>('/live/fetch', { reportDate: date });
+        const r = await api.post<FetchResult>('/live/fetch', { reportDate: date, force });
         setResult(r); setError('');
       } while (pendingRef.current);
       loadStatus();
@@ -173,6 +174,7 @@ export default function LiveReport() {
                 </button>
               : <Alert kind="info">Only managers and admins can fetch and send reports.</Alert>}
             {result && <span className="flex items-center gap-1.5 text-sm text-slate-500"><Clock3 className="h-4 w-4" /> Last fetched {new Date(result.fetchedAt).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' })} · {ago(result.fetchedAt, now)}{refreshMin > 0 && <Badge tone="green">auto · {refreshMin}m</Badge>}</span>}
+            {result && can('manager') && <button className="text-xs text-slate-500 underline-offset-2 hover:text-ink hover:underline disabled:opacity-50" disabled={busy || exportBusy || !ready} onClick={() => fetchNow(false, true)} title="Read every call for this day again from MySQL">Full re-check</button>}
           </div>
           {error && <div className="mt-4"><Alert kind="error">{error}</Alert></div>}
           {result?.reused && !error && <p className="mt-3 text-xs text-slate-500">No new calls since the previous fetch. Showing the same report.</p>}

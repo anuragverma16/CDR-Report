@@ -57,6 +57,12 @@ export async function listSessions() {
   const body = await getJson('/sessions', 'List sessions', 10000);
   const sessions = Array.isArray(body.data) ? body.data : Array.isArray(body.data?.sessions) ? body.data.sessions : null;
   if (!sessions) throw new ProviderError('Nexsahay returned an unexpected sessions response. Check NEXSAHAY_API_BASE.', { retryable: false });
+  // The session chosen by NEXSAHAY_SESSION_ID always counts; the name is only a fallback when no ID is set.
+  // (Gateway names look like "[tenant-id] Controller", so an exact name match alone can miss the real session.)
+  // Also accepts the session picked in the WhatsApp panel (stored setting), so that choice stays valid.
+  const stored = await Setting.findOne({ key: SESSION_SETTING_KEY }).lean().catch(() => null);
+  const allowed = new Set([config.whatsapp.nexsahay?.sessionId, stored?.value].filter(Boolean));
+  if (allowed.size) return sessions.filter((s) => allowed.has(s.id));
   return sessions.filter((s) => shortSessionName(s.name).trim().toLowerCase() === TARGET_SESSION_NAME.toLowerCase());
 }
 

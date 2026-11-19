@@ -123,12 +123,18 @@ export async function processFile(fileId, { mapping, options, classification, re
   file.status = 'processing';
   await file.save();
   try {
+    const t0 = Date.now();
+    const lap = (step) => { console.log(`[process ${file.originalName}] ${step} ${((Date.now() - t0) / 1000).toFixed(2)}s`); };
     const { records } = normalizeRows(parsed.rows, { mapping, options: opts, classification, tz: config.timezone });
+    lap(`normalize ${records.length} rows`);
     const existing = await existingKeysFor(records, file._id);
+    lap('duplicate check');
     const summary = summarizeRecords(records, existing);
     await CdrRecord.deleteMany({ fileId: file._id });
+    lap('delete old records');
     const docs = records.map((r, i) => ({ ...r, fileId: file._id, raw: parsed.headers.map((h) => parsed.rows[i].values[h] ?? null) }));
     for (let i = 0; i < docs.length; i += 2000) await CdrRecord.insertMany(docs.slice(i, i + 2000), { ordered: false, lean: true });
+    lap('insert records');
 
     const dates = summary.dates.map((d) => d.value);
     Object.assign(file, {

@@ -48,16 +48,17 @@ const classificationSchema = z.object({
 });
 
 // ---------- Auth ----------
-const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false });
+// Only failed attempts count toward the limit, so a correct sign-in never gets locked out by earlier typos on the same network
+const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, skipSuccessfulRequests: true, standardHeaders: true, legacyHeaders: false });
 
 router.post('/auth/login', loginLimiter, asyncH(async (req, res) => {
-  const { email, password } = z.object({ email: z.string().email(), password: z.string().min(1).max(200) }).parse(req.body);
-  const user = await User.findOne({ email: email.toLowerCase() });
+  const { email, password } = z.object({ email: z.string().trim().email(), password: z.string().min(1).max(200) }).parse(req.body);
+  const user = await User.findOne({ email: email.trim().toLowerCase() }).lean();
   if (!user || !user.active || !(await bcrypt.compare(password, user.passwordHash))) return res.status(401).json({ error: 'Invalid email or password' });
-  user.lastLoginAt = new Date();
-  await user.save();
+  // One small write, not awaited: the response does not wait for the login timestamp or audit log
+  User.updateOne({ _id: user._id }, { lastLoginAt: new Date() }).catch(() => {});
+  audit(user._id, 'auth.login', user.email);
   res.cookie(COOKIE, signSession(user), cookieOptions(12 * 3600 * 1000));
-  await audit(user._id, 'auth.login', user.email);
   res.json({ user: { id: user._id, email: user.email, name: user.name, role: user.role } });
 }));
 
@@ -268,8 +269,8 @@ router.post('/live/export', requireRole('manager'), cdrUpload.single('file'), as
   }
 }));
 router.post('/live/fetch', requireRole('manager'), asyncH(async (req, res) => {
-  const b = z.object({ reportDate: isoDate }).parse(req.body);
-  res.status(201).json(await fetchLiveReport({ date: b.reportDate, user: req.user, trigger: 'manual' }));
+  const b = z.object({ reportDate: isoDate, force: z.boolean().optional() }).parse(req.body);
+  res.status(201).json(await fetchLiveReport({ date: b.reportDate, user: req.user, trigger: 'manual', force: Boolean(b.force) }));
 }));
 
 router.get('/auth/me', (req, res) => res.json({ user: req.user }));
